@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Markdown
+import MarkdownParser
 
 public struct MarkdownDocumentHeader: Sendable, Hashable {
     public let level: Int
@@ -33,36 +33,52 @@ public struct MarkdownDocumentStatistics: Sendable, Hashable {
 }
 
 /// Markdown 解析和转换工具
-/// 注意：Ulysses 风格编辑器直接使用 MarkdownHighlighter 处理样式，
-/// 此类仅提供辅助功能（如导出 HTML）
 public struct MarkdownConverter {
 
     // MARK: - Markdown → HTML
 
-    /// 将 Markdown 文本转换为 HTML（用于导出或预览）
-    /// - Parameter markdown: Markdown 源文本
-    /// - Returns: HTML 字符串
+    /// 将 Markdown 文本转换为 HTML
     public static func toHTML(_ markdown: String, imageResolver: (@Sendable (String) -> String)? = nil)
         -> String
     {
-        let document = Document(parsing: markdown)
-        var htmlVisitor = HTMLVisitor(imageResolver: imageResolver)
-        return htmlVisitor.visit(document)
+        let parser = MarkdownParser()
+        let result = parser.parse(markdown)
+        var html = ""
+        for block in result.document {
+            html += visitBlock(block, imageResolver: imageResolver)
+        }
+        return html
     }
 
     public static func headers(from markdown: String) -> [MarkdownDocumentHeader] {
-        let document = Document(parsing: markdown)
-        var visitor = HeaderVisitor()
-        visitor.visit(document)
-        return visitor.headers
+        let parser = MarkdownParser()
+        let result = parser.parse(markdown)
+        let ranges = parser.parseBlockRange(markdown)
+        
+        var headers: [MarkdownDocumentHeader] = []
+        
+        for (index, block) in result.document.enumerated() {
+            guard index < ranges.count else { break }
+            if case let .heading(level, content) = block {
+                let range = ranges[index]
+                let lineIndex = calculateLineIndex(for: range.startIndex, in: markdown)
+                headers.append(
+                    MarkdownDocumentHeader(
+                        level: level,
+                        title: plainText(from: content),
+                        lineIndex: lineIndex
+                    )
+                )
+            }
+        }
+        return headers
     }
 
     public static func statistics(from markdown: String, readingWordsPerMinute: Int = 300)
         -> MarkdownDocumentStatistics
     {
-        let document = Document(parsing: markdown)
-        let plainText = plainText(from: document)
-        let wordCount = plainText.components(separatedBy: .whitespacesAndNewlines)
+        let plain = plainText(from: markdown)
+        let wordCount = plain.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }.count
         let wordsPerMinute = max(1, readingWordsPerMinute)
         let readingTime = max(1, Int(ceil(Double(wordCount) / Double(wordsPerMinute))))
@@ -74,167 +90,181 @@ public struct MarkdownConverter {
     }
 
     public static func plainText(from markdown: String) -> String {
-        let document = Document(parsing: markdown)
-        return plainText(from: document)
+        let parser = MarkdownParser()
+        let result = parser.parse(markdown)
+        var text = ""
+        for block in result.document {
+            text += plainText(from: block)
+        }
+        return text
     }
 
-    fileprivate static func plainText(from markup: any Markup) -> String {
-        var visitor = PlainTextVisitor()
-        visitor.visit(markup)
-        return visitor.text
+    // MARK: - Private Helpers
+
+    private static func calculateLineIndex(for index: String.Index, in text: String) -> Int {
+        var count = 0
+        var current = text.startIndex
+        while current < index && current < text.endIndex {
+            if text[current] == "\n" {
+                count += 1
+            }
+            current = text.index(after: current)
+        }
+        return count
     }
 
-    // MARK: - Validate
+    private static func visitBlock(_ block: MarkdownBlockNode, imageResolver: (@Sendable (String) -> String)? = nil) -> String {
+        switch block {
+        case let .blockquote(children):
+            let body = children.map { visitBlock($0, imageResolver: imageResolver) }.joined()
+            return "<blockquote>\n\(body)</blockquote>\n"
+        case let .bulletedList(_, items):
+            let body = items.map { item in
+                let content = item.children.map { visitBlock($0, imageResolver: imageResolver) }.joined()
+                return "<li>\(content)</li>\n"
+            }.joined()
+            return "<ul>\n\(body)</ul>\n"
+        case let .numberedList(_, start, items):
+            let startAttr = start != 1 ? " start=\"\(start)\"" : ""
+            let body = items.map { item in
+                let content = item.children.map { visitBlock($0, imageResolver: imageResolver) }.joined()
+                return "<li>\(content)</li>\n"
+            }.joined()
+            return "<ol\(startAttr)>\n\(body)</ol>\n"
+        case let .taskList(_, items):
+            let body = items.map { item in
+                let checked = item.isCompleted ? " checked" : ""
+                let content = item.children.map { visitBlock($0, imageResolver: imageResolver) }.joined()
+                return "<li><input type=\"checkbox\" disabled\(checked)> \(content)</li>\n"
+            }.joined()
+            return "<ul class=\"task-list\">\n\(body)</ul>\n"
+        case let .codeBlock(fenceInfo, content):
+            let langClass = fenceInfo.map { " class=\"language-\($0.htmlAttributeEscaped())\"" } ?? ""
+            return "<pre><code\(langClass)>\(content.htmlEscaped())</code></pre>\n"
+        case let .paragraph(content):
+            let body = content.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<p>\(body)</p>\n"
+        case let .heading(level, content):
+            let body = content.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<h\(level)>\(body)</h\(level)>\n"
+        case let .table(columnAlignments, rows):
+            var html = "<table>\n"
+            if let firstRow = rows.first {
+                html += "<thead>\n<tr>\n"
+                for (i, cell) in firstRow.cells.enumerated() {
+                    let align = i < columnAlignments.count ? alignmentAttr(columnAlignments[i]) : ""
+                    let content = cell.content.map { visitInline($0, imageResolver: imageResolver) }.joined()
+                    html += "<th\(align)>\(content)</th>\n"
+                }
+                html += "</tr>\n</thead>\n"
+            }
+            if rows.count > 1 {
+                html += "<tbody>\n"
+                for row in rows.dropFirst() {
+                    html += "<tr>\n"
+                    for (i, cell) in row.cells.enumerated() {
+                        let align = i < columnAlignments.count ? alignmentAttr(columnAlignments[i]) : ""
+                        let content = cell.content.map { visitInline($0, imageResolver: imageResolver) }.joined()
+                        html += "<td\(align)>\(content)</td>\n"
+                    }
+                    html += "</tr>\n"
+                }
+                html += "</tbody>\n"
+            }
+            html += "</table>\n"
+            return html
+        case .thematicBreak:
+            return "<hr />\n"
+        }
+    }
 
-    /// 验证 Markdown 语法
-    /// - Parameter markdown: Markdown 文本
-    /// - Returns: 是否有效
+    private static func alignmentAttr(_ alignment: RawTableColumnAlignment) -> String {
+        switch alignment {
+        case .left: return " align=\"left\""
+        case .center: return " align=\"center\""
+        case .right: return " align=\"right\""
+        case .none: return ""
+        }
+    }
+
+    private static func visitInline(_ inline: MarkdownInlineNode, imageResolver: (@Sendable (String) -> String)? = nil) -> String {
+        switch inline {
+        case let .text(text):
+            return text.htmlEscaped()
+        case .softBreak:
+            return " "
+        case .lineBreak:
+            return "<br />\n"
+        case let .code(code):
+            return "<code>\(code.htmlEscaped())</code>"
+        case let .html(html):
+            return html
+        case let .emphasis(children):
+            let body = children.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<em>\(body)</em>"
+        case let .strong(children):
+            let body = children.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<strong>\(body)</strong>"
+        case let .strikethrough(children):
+            let body = children.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<del>\(body)</del>"
+        case let .link(destination, children):
+            let body = children.map { visitInline($0, imageResolver: imageResolver) }.joined()
+            return "<a href=\"\(destination.htmlAttributeEscaped())\">\(body)</a>"
+        case let .image(source, children):
+            let resolved = imageResolver?(source) ?? source
+            let alt = plainText(from: children)
+            return "<img src=\"\(resolved.htmlAttributeEscaped())\" alt=\"\(alt.htmlAttributeEscaped())\" />"
+        case let .math(content, _):
+            return "<span class=\"math\">\(content.htmlEscaped())</span>"
+        }
+    }
+
+    private static func plainText(from block: MarkdownBlockNode) -> String {
+        switch block {
+        case let .blockquote(children):
+            return children.map { plainText(from: $0) }.joined(separator: " ")
+        case let .bulletedList(_, items):
+            return items.map { item in item.children.map { plainText(from: $0) }.joined(separator: " ") }.joined(separator: "\n")
+        case let .numberedList(_, _, items):
+            return items.map { item in item.children.map { plainText(from: $0) }.joined(separator: " ") }.joined(separator: "\n")
+        case let .taskList(_, items):
+            return items.map { item in item.children.map { plainText(from: $0) }.joined(separator: " ") }.joined(separator: "\n")
+        case let .codeBlock(_, content):
+            return content
+        case let .paragraph(content):
+            return plainText(from: content)
+        case let .heading(_, content):
+            return plainText(from: content)
+        case let .table(_, rows):
+            return rows.map { row in row.cells.map { plainText(from: $0.content) }.joined(separator: " | ") }.joined(separator: "\n")
+        case .thematicBreak:
+            return ""
+        }
+    }
+
+    private static func plainText(from inlines: [MarkdownInlineNode]) -> String {
+        return inlines.map { plainText(from: $0) }.joined()
+    }
+
+    private static func plainText(from inline: MarkdownInlineNode) -> String {
+        switch inline {
+        case let .text(text): return text
+        case .softBreak: return " "
+        case .lineBreak: return "\n"
+        case let .code(code): return code
+        case let .html(html): return html
+        case let .emphasis(children): return plainText(from: children)
+        case let .strong(children): return plainText(from: children)
+        case let .strikethrough(children): return plainText(from: children)
+        case let .link(_, children): return plainText(from: children)
+        case let .image(_, children): return plainText(from: children)
+        case let .math(content, _): return content
+        }
+    }
+    
     public static func isValid(_ markdown: String) -> Bool {
-        // swift-markdown 库总是能解析，这里只是占位
         return true
-    }
-}
-
-// MARK: - HTML Visitor
-
-private struct HTMLVisitor: MarkupVisitor {
-    typealias Result = String
-    let imageResolver: (@Sendable (String) -> String)?
-
-    mutating func defaultVisit(_ markup: any Markup) -> String {
-        var result = ""
-        for child in markup.children {
-            result += visit(child)
-        }
-        return result
-    }
-
-    mutating func visitDocument(_ document: Document) -> String {
-        defaultVisit(document)
-    }
-
-    mutating func visitParagraph(_ paragraph: Paragraph) -> String {
-        "<p>\(defaultVisit(paragraph))</p>\n"
-    }
-
-    mutating func visitText(_ text: Text) -> String {
-        text.string.htmlEscaped()
-    }
-
-    mutating func visitStrong(_ strong: Strong) -> String {
-        "<strong>\(defaultVisit(strong))</strong>"
-    }
-
-    mutating func visitEmphasis(_ emphasis: Emphasis) -> String {
-        "<em>\(defaultVisit(emphasis))</em>"
-    }
-
-    mutating func visitInlineCode(_ inlineCode: InlineCode) -> String {
-        "<code>\(inlineCode.code)</code>"
-    }
-
-    mutating func visitHeading(_ heading: Heading) -> String {
-        let level = heading.level
-        return "<h\(level)>\(defaultVisit(heading))</h\(level)>\n"
-    }
-
-    mutating func visitLink(_ link: Link) -> String {
-        let href = (link.destination ?? "").htmlAttributeEscaped()
-        return "<a href=\"\(href)\">\(defaultVisit(link))</a>"
-    }
-
-    mutating func visitImage(_ image: Image) -> String {
-        let source = image.source ?? ""
-        let resolvedSource = imageResolver?(source) ?? source
-        let title = image.title ?? ""
-        let alt = MarkdownConverter.plainText(from: image)
-        return """
-            <img src="\(resolvedSource.htmlAttributeEscaped())" title="\(title.htmlAttributeEscaped())" alt="\(alt.htmlAttributeEscaped())" />
-            """
-    }
-
-    mutating func visitUnorderedList(_ unorderedList: UnorderedList) -> String {
-        "<ul>\n\(defaultVisit(unorderedList))</ul>\n"
-    }
-
-    mutating func visitOrderedList(_ orderedList: OrderedList) -> String {
-        "<ol>\n\(defaultVisit(orderedList))</ol>\n"
-    }
-
-    mutating func visitListItem(_ listItem: ListItem) -> String {
-        "<li>\(defaultVisit(listItem))</li>\n"
-    }
-
-    mutating func visitBlockQuote(_ blockQuote: BlockQuote) -> String {
-        "<blockquote>\(defaultVisit(blockQuote))</blockquote>\n"
-    }
-
-    mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String {
-        let langClass = codeBlock.language.map { " class=\"language-\($0.htmlAttributeEscaped())\"" } ?? ""
-        return "<pre><code\(langClass)>\(codeBlock.code.htmlEscaped())</code></pre>\n"
-    }
-
-    mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) -> String {
-        "<hr />\n"
-    }
-
-    mutating func visitSoftBreak(_ softBreak: SoftBreak) -> String {
-        "\n"
-    }
-
-    mutating func visitLineBreak(_ lineBreak: LineBreak) -> String {
-        "<br />\n"
-    }
-
-    mutating func visitInlineHTML(_ inlineHTML: InlineHTML) -> String {
-        inlineHTML.rawHTML
-    }
-
-    mutating func visitHTMLBlock(_ htmlBlock: HTMLBlock) -> String {
-        htmlBlock.rawHTML
-    }
-
-    mutating func visitTable(_ table: Table) -> String {
-        "<table>\(defaultVisit(table))</table>"
-    }
-
-    mutating func visitTableHead(_ tableHead: Table.Head) -> String {
-        "<thead>\(defaultVisit(tableHead))</thead>"
-    }
-
-    mutating func visitTableBody(_ tableBody: Table.Body) -> String {
-        "<tbody>\(defaultVisit(tableBody))</tbody>"
-    }
-
-    mutating func visitTableRow(_ tableRow: Table.Row) -> String {
-        "<tr>\(defaultVisit(tableRow))</tr>"
-    }
-
-    mutating func visitTableCell(_ tableCell: Table.Cell) -> String {
-        let tag = tableCell.parent is Table.Head ? "th" : "td"
-        return "<\(tag)>\(defaultVisit(tableCell))</\(tag)>"
-    }
-}
-
-private struct HeaderVisitor: MarkupVisitor {
-    typealias Result = Void
-    var headers: [MarkdownDocumentHeader] = []
-
-    mutating func defaultVisit(_ markup: any Markup) {
-        for child in markup.children {
-            visit(child)
-        }
-    }
-
-    mutating func visitHeading(_ heading: Heading) {
-        let lineIndex = heading.range?.lowerBound.line ?? 0
-        headers.append(
-            MarkdownDocumentHeader(
-                level: heading.level,
-                title: MarkdownConverter.plainText(from: heading),
-                lineIndex: max(0, lineIndex - 1)
-            )
-        )
     }
 }
 
@@ -249,28 +279,5 @@ private extension String {
 
     func htmlAttributeEscaped() -> String {
         htmlEscaped()
-    }
-}
-
-private struct PlainTextVisitor: MarkupVisitor {
-    typealias Result = Void
-    var text = ""
-
-    mutating func defaultVisit(_ markup: any Markup) {
-        for child in markup.children {
-            visit(child)
-        }
-    }
-
-    mutating func visitText(_ text: Text) {
-        self.text += text.string
-    }
-
-    mutating func visitSoftBreak(_ softBreak: SoftBreak) {
-        text += " "
-    }
-
-    mutating func visitLineBreak(_ lineBreak: LineBreak) {
-        text += "\n"
     }
 }

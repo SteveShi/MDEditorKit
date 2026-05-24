@@ -1,0 +1,86 @@
+name: Build & Release XCFramework
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build XCFramework
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer || \
+            sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        run: |
+          brew update
+          brew install xcodegen xcbeautify
+
+      - name: Build XCFramework
+        run: |
+          chmod +x ./build_xcframework.sh
+          ./build_xcframework.sh
+
+      - name: Compute SHA256 (for release notes)
+        id: hash
+        run: |
+          SHA=$(shasum -a 256 build/MDEditorKit.xcframework.zip | awk '{print $1}')
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          CHECKSUM=""
+          if [ -f build/MDEditorKit.xcframework.zip.checksum ]; then
+            CHECKSUM=$(cat build/MDEditorKit.xcframework.zip.checksum)
+          fi
+          echo "spm_checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          if [ -z "${TAG}" ] || [ "${GITHUB_REF}" = "${TAG}" ]; then
+            TAG="manual-$(date -u +%Y%m%d-%H%M%S)"
+          fi
+          echo "name=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MDEditorKit-${{ steps.tag.outputs.name }}-xcframework
+          path: |
+            build/MDEditorKit.xcframework.zip
+            build/MDEditorKit.xcframework.zip.checksum
+
+      - name: Create / update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: MDEditorKit ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## MDEditorKit ${{ steps.tag.outputs.name }}
+
+            Prebuilt macOS XCFramework. Drop the zip into your Xcode project as a binary dependency, or keep using Swift Package Manager from source — both paths are supported.
+
+            **Asset checksums**
+
+            - `MDEditorKit.xcframework.zip` SHA-256: `${{ steps.hash.outputs.sha256 }}`
+            - SwiftPM `binaryTarget` checksum: `${{ steps.hash.outputs.spm_checksum }}`
+          files: |
+            build/MDEditorKit.xcframework.zip
+            build/MDEditorKit.xcframework.zip.checksum

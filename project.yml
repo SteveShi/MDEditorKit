@@ -1,16 +1,18 @@
-name: MDEditor
+name: MDEditorKit
 options:
   bundleIdPrefix: com.steveshi
 targets:
-  MDEditor:
+  MDEditorKit:
     type: framework
     platform: macOS
     deploymentTarget: "14.0"
     sources:
-      - path: Sources/MDEditor
+      - path: Sources/MDEditorKit
     settings:
       BUILD_LIBRARY_FOR_DISTRIBUTION: YES
       SKIP_INSTALL: NO
+      PRODUCT_BUNDLE_IDENTIFIER: com.steveshi.MDEditorKit
+      DEFINES_MODULE: YES
     dependencies:
       - package: MarkdownView
         product: MarkdownView

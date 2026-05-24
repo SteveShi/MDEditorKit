@@ -1,30 +1,75 @@
-# MDEditor
+# MDEditorKit
 
-MDEditor is a Markdown editor component for macOS and iOS built on TextKit 2, designed to provide a Ulysses-style "What You See Is Mean" editing experience.
+MDEditorKit is a native macOS Markdown editor component built on TextKit 2. It delivers a Ulysses-style "what you see is what you mean" editing surface — Markdown source stays in place, while syntax markers, headings, lists, code, images, and quotes are styled inline as you type. The package powers [MDWriter](https://github.com/SteveShi/MDWriter) and is reusable in any SwiftUI or AppKit host.
+
+> Renamed from **MDEditor** in 2.0.0. The Swift module is now `MDEditorKit`; public type names (`MDEditorView`, `MDEditorProxy`, `EditorConfiguration`, …) are unchanged.
 
 ## Features
 
-- **TextKit 2 Architecture**: Leverages Apple's latest text engine for high performance and deep customization.
-- **Real-time Highlighting**: Supports full Markdown syntax highlighting including bold, italic, code blocks, links, and more.
-- **Image Preview**: In-editor rendering for both local and remote images.
-- **Typewriter Mode**: Keeps the cursor centered on the screen for a focused writing experience.
-- **Modular Design**: Easy to integrate into any SwiftUI or AppKit based Swift project.
+- **TextKit 2 engine.** Real layout and selection model, not a `WKWebView` wrapper. macOS 14+ and iOS 17+.
+- **In-place Markdown styling ("MarkX").** Headings, bold, italic, strikethrough, inline code, fenced code blocks, links, images, ATX/Setext headers, blockquotes, ordered & unordered lists, GFM task lists — all rendered with native attributes while the underlying source remains a `String`.
+- **Themable end-to-end.** `EditorTheme` exposes background, body, headings, syntax markers, emphasis, inline code, code-block background, blockquote, link, and caret color. Swap themes at runtime with `proxy.setTheme(_:)`.
+- **Image attachments.** Local and remote images render inline; hosts plug in their own storage with `EditorConfiguration.imageProvider` / `imageSaver`.
+- **Proxy-based control surface.** `MDEditorProxy` exposes a single point of contact for inserting text, wrapping selections, swapping block prefixes, finding/replacing, undo/redo, focus, scrolling, caret geometry, selection helpers, document stats, attributed-string export, and indent/outdent.
+- **Real-time observation hooks.** `onTextChange` and `onSelectionChange` callbacks fire on the main actor so hosts can drive autosave, context-sensitive toolbars, stats UI, or AI streaming without re-reading the buffer.
+- **Typewriter mode** centers the caret while you write.
+- **Distributed both as Swift source and as a prebuilt XCFramework.**
+
+## Requirements
+
+- macOS 14.0+ (iOS 17.0+ supported by the source; XCFramework distribution currently ships the macOS slice only)
+- Swift 6.0+
+- Xcode 16+
 
 ## Installation
 
-### Swift Package Manager
+### Option A — Swift Package Manager (from source)
 
-Add the following dependency to your project:
+Add the dependency to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/SteveShi/MDEditor.git", from: "1.8.0")
+.package(url: "https://github.com/SteveShi/MDEditorKit.git", from: "2.0.0")
+```
+
+Then add `MDEditorKit` as a product dependency to your target. In an XcodeGen-driven project use:
+
+```yaml
+packages:
+  MDEditorKit:
+    url: https://github.com/SteveShi/MDEditorKit.git
+    from: 2.0.0
+targets:
+  YourApp:
+    dependencies:
+      - package: MDEditorKit
+        product: MDEditorKit
+```
+
+### Option B — Prebuilt XCFramework (Xcode binary integration)
+
+Every tagged release ships `MDEditorKit.xcframework.zip` as a GitHub Release asset.
+
+1. Download `MDEditorKit.xcframework.zip` from the [Releases page](https://github.com/SteveShi/MDEditorKit/releases) and unzip.
+2. Drag `MDEditorKit.xcframework` into your Xcode project navigator.
+3. In **Target → General → Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
+4. `import MDEditorKit` and you're done.
+
+The framework is built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`, so it's safe to consume across Swift toolchain versions that share an ABI.
+
+To rebuild locally:
+
+```bash
+./build_xcframework.sh
+# → build/MDEditorKit.xcframework
+# → build/MDEditorKit.xcframework.zip
+# → build/MDEditorKit.xcframework.zip.checksum   (SwiftPM binaryTarget checksum)
 ```
 
 ## Quick Start
 
 ```swift
 import SwiftUI
-import MDEditor
+import MDEditorKit
 
 struct EditorScreen: View {
     @State private var text: String = "# Hello\n\nStart writing…"
@@ -172,6 +217,14 @@ proxy.onTextChange = { [weak self] _ in
 | --- | --- | --- |
 | `imageProvider` | `(@Sendable (String) -> NSImage?)?` | Resolve a Markdown image reference (filename) back into an in-line `NSImage` for preview. |
 | `imageSaver` | `(@Sendable (NSImage) -> String?)?` | Persist an `NSImage` (from paste, drag, or `proxy.insertImage`) and return the URL or relative path used inside the Markdown reference. Return `nil` to opt out — the editor inserts nothing in that case. |
+
+## Releases
+
+Tagged releases are published on GitHub. Each release includes:
+
+- Source archive (`.tar.gz` / `.zip`) — used by SwiftPM.
+- `MDEditorKit.xcframework.zip` — prebuilt macOS XCFramework for Xcode binary integration.
+- `MDEditorKit.xcframework.zip.checksum` — SwiftPM `binaryTarget` checksum if you want to host a binary package.
 
 ## License
 

@@ -49,6 +49,8 @@ public struct MDEditorView: NSViewRepresentable {
             if !isUpdatingFromSwiftUI && reconstructed != parent.text {
                 parent.text = reconstructed
             }
+            // 广播文本变化：宿主可在此挂载防抖自动保存、字数刷新、AI 监听等副作用。
+            parent.proxy.onTextChange?(reconstructed)
         }
 
         /// 从富文本中还原 Markdown 源码，处理被替换为图片的附件。
@@ -206,6 +208,160 @@ public struct MDEditorView: NSViewRepresentable {
 
             parent.proxy.setEditorThemeAction = { [weak textView] theme in
                 textView?.apply(theme: theme)
+            }
+
+            // MARK: New APIs (1.8.0)
+
+            // —— 行级 helpers
+            parent.proxy.getCurrentLineRangeAction = { [weak textView] in
+                guard let tv = textView else { return NSRange(location: 0, length: 0) }
+                let ns = tv.string as NSString
+                let loc = min(tv.selectedRange().location, ns.length)
+                return ns.lineRange(for: NSRange(location: loc, length: 0))
+            }
+            parent.proxy.getCurrentLineTextAction = { [weak textView] in
+                guard let tv = textView else { return "" }
+                let ns = tv.string as NSString
+                let loc = min(tv.selectedRange().location, ns.length)
+                let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+                return ns.substring(with: lineRange)
+            }
+            parent.proxy.replaceCurrentLineAction = { [weak textView] replacement in
+                guard let tv = textView else { return }
+                let ns = tv.string as NSString
+                let loc = min(tv.selectedRange().location, ns.length)
+                let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+                tv.insertText(replacement, replacementRange: lineRange)
+            }
+
+            // —— Undo / Redo
+            parent.proxy.undoAction = { [weak textView] in
+                textView?.undoManager?.undo()
+            }
+            parent.proxy.redoAction = { [weak textView] in
+                textView?.undoManager?.redo()
+            }
+            parent.proxy.canUndoAction = { [weak textView] in
+                textView?.undoManager?.canUndo ?? false
+            }
+            parent.proxy.canRedoAction = { [weak textView] in
+                textView?.undoManager?.canRedo ?? false
+            }
+
+            // —— 焦点
+            parent.proxy.focusAction = { [weak textView] in
+                guard let tv = textView, let window = tv.window else { return }
+                window.makeFirstResponder(tv)
+            }
+            parent.proxy.resignFocusAction = { [weak textView] in
+                guard let tv = textView, let window = tv.window else { return }
+                if window.firstResponder === tv {
+                    window.makeFirstResponder(nil)
+                }
+            }
+
+            // —— 滚动
+            parent.proxy.scrollRangeToVisibleAction = { [weak textView] range in
+                textView?.scrollRangeToVisible(range)
+            }
+            parent.proxy.scrollToTopAction = { [weak textView] in
+                textView?.scrollRangeToVisible(NSRange(location: 0, length: 0))
+            }
+            parent.proxy.scrollToBottomAction = { [weak textView] in
+                guard let tv = textView else { return }
+                let length = (tv.string as NSString).length
+                tv.scrollRangeToVisible(NSRange(location: length, length: 0))
+            }
+
+            // —— 光标矩形（窗口坐标系）
+            parent.proxy.caretFrameInWindowAction = { [weak textView] in
+                guard let tv = textView,
+                      let layoutManager = tv.layoutManager,
+                      let textContainer = tv.textContainer else { return nil }
+                let selected = tv.selectedRange()
+                let caretRange = NSRange(location: selected.location, length: 0)
+                let glyphRange = layoutManager.glyphRange(
+                    forCharacterRange: caretRange, actualCharacterRange: nil)
+                var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+                rect.origin.x += tv.textContainerOrigin.x
+                rect.origin.y += tv.textContainerOrigin.y
+                // textView → window
+                let inView = tv.convert(rect, to: nil)
+                return inView
+            }
+
+            // —— 选择辅助
+            parent.proxy.selectAllAction = { [weak textView] in
+                textView?.selectAll(nil)
+            }
+            parent.proxy.selectLineAction = { [weak textView] in
+                guard let tv = textView else { return }
+                let ns = tv.string as NSString
+                let loc = min(tv.selectedRange().location, ns.length)
+                let lineRange = ns.lineRange(for: NSRange(location: loc, length: 0))
+                tv.setSelectedRange(lineRange)
+            }
+            parent.proxy.selectParagraphAction = { [weak textView] in
+                guard let tv = textView else { return }
+                let ns = tv.string as NSString
+                let loc = min(tv.selectedRange().location, ns.length)
+                let paragraphRange = ns.paragraphRange(for: NSRange(location: loc, length: 0))
+                tv.setSelectedRange(paragraphRange)
+            }
+
+            // —— 统计
+            parent.proxy.statsAction = { [weak self, weak textView] in
+                guard let self = self, let tv = textView else {
+                    return EditorStats(characterCount: 0, wordCount: 0, lineCount: 0)
+                }
+                let text = self.reconstructMarkdown(from: tv.textStorage)
+                let characterCount = text.count
+                let wordCount = text.split(
+                    whereSeparator: { $0.isWhitespace || $0.isNewline }
+                ).count
+                let lineCount: Int
+                if text.isEmpty {
+                    lineCount = 0
+                } else {
+                    // 末尾换行也算作一行的结束，与 wc -l 等工具一致
+                    lineCount = text.reduce(into: 1) { acc, ch in
+                        if ch == "\n" { acc += 1 }
+                    } - (text.last == "\n" ? 1 : 0)
+                }
+                return EditorStats(
+                    characterCount: characterCount,
+                    wordCount: wordCount,
+                    lineCount: max(lineCount, text.isEmpty ? 0 : 1)
+                )
+            }
+
+            // —— 插入图片
+            parent.proxy.insertImageAttachmentAction = { [weak self, weak textView] image, altText in
+                guard let self = self, let tv = textView else { return }
+                guard let saver = self.parent.configuration.imageSaver,
+                      let urlString = saver(image)
+                else { return }
+                let alt = altText.isEmpty ? "" : altText
+                let markdown = "![\(alt)](\(urlString))"
+                tv.insertText(markdown, replacementRange: tv.selectedRange())
+            }
+
+            // —— 导出富文本
+            parent.proxy.exportAttributedStringAction = { [weak textView] in
+                guard let storage = textView?.textStorage else {
+                    return NSAttributedString(string: "")
+                }
+                return NSAttributedString(attributedString: storage)
+            }
+
+            // —— 缩进 / 反缩进
+            parent.proxy.indentSelectionAction = { [weak textView] in
+                guard let tv = textView else { return }
+                applyIndent(to: tv, outdent: false)
+            }
+            parent.proxy.outdentSelectionAction = { [weak textView] in
+                guard let tv = textView else { return }
+                applyIndent(to: tv, outdent: true)
             }
         }
     }
@@ -493,4 +649,44 @@ class MarkdownTextView: NSTextView {
             .foregroundColor: fallbackForeground,
         ]
     }
+}
+
+// MARK: - Indent Helpers
+
+/// 对 `textView` 当前选中行集合统一加/减一层缩进。
+/// 缩进单位：单个 Tab。反缩进时优先去掉一个前导 Tab；若行首为 2 或 4 个空格也接受。
+@MainActor
+fileprivate func applyIndent(to textView: NSTextView, outdent: Bool) {
+    let ns = textView.string as NSString
+    let selected = textView.selectedRange()
+    let lineRange = ns.lineRange(for: selected)
+    let block = ns.substring(with: lineRange)
+
+    // 保留尾随换行，逐行处理
+    var trailingNewline = ""
+    var workingBlock = block
+    if block.hasSuffix("\r\n") {
+        trailingNewline = "\r\n"
+        workingBlock = String(block.dropLast(2))
+    } else if block.hasSuffix("\n") {
+        trailingNewline = "\n"
+        workingBlock = String(block.dropLast())
+    }
+
+    let lines = workingBlock.components(separatedBy: "\n")
+    let newLines: [String] = lines.map { line in
+        if outdent {
+            if line.hasPrefix("\t") { return String(line.dropFirst()) }
+            if line.hasPrefix("    ") { return String(line.dropFirst(4)) }
+            if line.hasPrefix("  ") { return String(line.dropFirst(2)) }
+            return line
+        } else {
+            return "\t" + line
+        }
+    }
+    let newBlock = newLines.joined(separator: "\n") + trailingNewline
+    textView.insertText(newBlock, replacementRange: lineRange)
+    // 重新选中处理过的行集合，便于继续 Tab/Shift-Tab
+    let newLength = (newBlock as NSString).length
+    textView.setSelectedRange(NSRange(location: lineRange.location, length: newLength))
 }

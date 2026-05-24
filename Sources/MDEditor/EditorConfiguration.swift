@@ -45,6 +45,11 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
     /// 图片提供者回调 (文件名) -> NSImage?
     public var imageProvider: (@Sendable (String) -> NSImage?)?
 
+    /// 图片落盘回调：(NSImage) -> markdown 引用使用的 URL/相对路径字符串。
+    /// 在 `MDEditorProxy.insertImage(_:altText:)` / 粘贴 / 拖拽时调用，
+    /// 由宿主决定文件命名、存储位置；返回 nil 表示宿主放弃保存，编辑器不插入任何文本。
+    public var imageSaver: (@Sendable (NSImage) -> String?)?
+
     /// 字号
     public var fontSize: CGFloat = 17.0
 
@@ -81,7 +86,8 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
         typewriterMode: Bool = false,
         markdownStandard: MarkdownStandard = .markdownXL,
         theme: EditorTheme = .default,
-        imageProvider: (@Sendable (String) -> NSImage?)? = nil
+        imageProvider: (@Sendable (String) -> NSImage?)? = nil,
+        imageSaver: (@Sendable (NSImage) -> String?)? = nil
     ) {
         self.fontName = fontName
         self.lineHeightMultiple = lineHeightMultiple
@@ -92,6 +98,7 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
         self.markdownStandard = markdownStandard
         self.theme = theme
         self.imageProvider = imageProvider
+        self.imageSaver = imageSaver
     }
 
     // MARK: - Equatable & Hashable

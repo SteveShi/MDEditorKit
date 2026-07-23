@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2.1.0
+
+### Optimized
+- Refactored `MarkdownHighlighter` by extracting unified syntax marker fade helper `applyMarkerFade`, eliminating redundant attribute application across bold, italic, code, and strikethrough logic.
+- Simplified `MarkdownConverter.calculateLineIndex(for:in:)` using Swift standard library string filtering (`text[..<index].filter { $0 == "\n" }.count`).
+
+### Cleaned
+- Removed unused `MarkdownStandard` enum and `markdownStandard` configuration property from `EditorConfiguration`.
+- Removed `firstLineIndent` configuration property that was not applied in paragraph styling.
+- Removed dead `MarkdownConverter.isValid(_:)` stub method.
+
+---
+
+### 优化
+- 重构 `MarkdownHighlighter`，提取统一的语法标记淡化辅助函数 `applyMarkerFade`，消除加粗、斜体、行内代码、删除线等样式的重复代码。
+- 简化 `MarkdownConverter.calculateLineIndex(for:in:)`，改用 Swift 标准库切片方法 `text[..<index].filter { $0 == "\n" }.count`。
+
+### 清理
+- 移除 `EditorConfiguration` 中未使用的 `MarkdownStandard` 枚举及 `markdownStandard` 配置项。
+- 移除未在段落样式中生效的 `firstLineIndent` 配置项。
+- 移除无实际功能的 `MarkdownConverter.isValid(_:)` 存根方法。
+
 ## 2.0.0
 
 ### Renamed

@@ -102,15 +102,7 @@ public struct MarkdownConverter {
     // MARK: - Private Helpers
 
     private static func calculateLineIndex(for index: String.Index, in text: String) -> Int {
-        var count = 0
-        var current = text.startIndex
-        while current < index && current < text.endIndex {
-            if text[current] == "\n" {
-                count += 1
-            }
-            current = text.index(after: current)
-        }
-        return count
+        text[..<index].filter { $0 == "\n" }.count
     }
 
     private static func visitBlock(_ block: MarkdownBlockNode, imageResolver: (@Sendable (String) -> String)? = nil) -> String {
@@ -271,10 +263,7 @@ public struct MarkdownConverter {
         @unknown default: return ""
         }
     }
-    
-    public static func isValid(_ markdown: String) -> Bool {
-        return true
-    }
+
 }
 
 private extension String {

@@ -271,99 +271,67 @@ public final class MarkdownHighlighter: @unchecked Sendable {
         storage.addAttribute(.font, value: syntaxFont, range: hashRange)
     }
 
+    private func applyMarkerFade(to storage: NSTextStorage, fullRange: NSRange, markerLength: Int) {
+        let startMarker = NSRange(location: fullRange.location, length: markerLength)
+        let endMarker = NSRange(location: fullRange.location + fullRange.length - markerLength, length: markerLength)
+        let attrs: [NSAttributedString.Key: Any] = [.font: syntaxFont, .foregroundColor: syntaxColor]
+        storage.addAttributes(attrs, range: startMarker)
+        storage.addAttributes(attrs, range: endMarker)
+    }
+
     private func applyBoldStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
-
-        // 1. 全量应用粗体字体 + 强调色
         let boldFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .boldFontMask)
         storage.addAttribute(.font, value: boldFont, range: fullRange)
         storage.addAttribute(.foregroundColor, value: emphasisColor, range: fullRange)
-
-        // 2. 仅对符号进行染色淡化
-        let startMarker = NSRange(location: fullRange.location, length: 2)
-        let endMarker = NSRange(location: fullRange.location + fullRange.length - 2, length: 2)
-        storage.addAttributes([.foregroundColor: syntaxColor], range: startMarker)
-        storage.addAttributes([.foregroundColor: syntaxColor], range: endMarker)
+        applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 2)
     }
 
     private func applyItalicStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
         let contentRange = match.range(at: 1)
-
-        // 内容斜体 + 强调色
         let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-        storage.addAttributes(
-            [.font: italicFont, .foregroundColor: emphasisColor], range: contentRange)
-
-        // 语法标记淡化
-        let startMarker = NSRange(location: fullRange.location, length: 1)
-        let endMarker = NSRange(location: fullRange.location + fullRange.length - 1, length: 1)
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: startMarker)
-        storage.addAttributes([.font: syntaxFont, .foregroundColor: syntaxColor], range: endMarker)
+        storage.addAttributes([.font: italicFont, .foregroundColor: emphasisColor], range: contentRange)
+        applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 1)
     }
 
     private func applyInlineCodeStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
         let contentRange = match.range(at: 1)
-
-        // 代码样式
-        let monoFont = NSFont.monospacedSystemFont(
-            ofSize: baseFont.pointSize * 0.9, weight: .regular)
-        storage.addAttributes(
-            [
-                .font: monoFont,
-                .foregroundColor: codeColor,
-                .backgroundColor: codeBackground,
-            ], range: contentRange)
-
-        // 反引号淡化
-        let startMarker = NSRange(location: fullRange.location, length: 1)
-        let endMarker = NSRange(location: fullRange.location + fullRange.length - 1, length: 1)
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: startMarker)
-        storage.addAttributes([.font: syntaxFont, .foregroundColor: syntaxColor], range: endMarker)
+        let monoFont = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.9, weight: .regular)
+        storage.addAttributes([
+            .font: monoFont,
+            .foregroundColor: codeColor,
+            .backgroundColor: codeBackground,
+        ], range: contentRange)
+        applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 1)
     }
 
     private func applyLinkStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let textRange = match.range(at: 1)
         let urlRange = match.range(at: 2)
 
-        // 链接文本
-        storage.addAttributes(
-            [
-                .foregroundColor: linkColor,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ], range: textRange)
+        storage.addAttributes([
+            .foregroundColor: linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ], range: textRange)
 
-        // URL 和括号淡化
         let bracketStart = NSRange(location: match.range.location, length: 1)
         let bracketEnd = NSRange(location: textRange.location + textRange.length, length: 2)
         let closeParen = NSRange(location: urlRange.location + urlRange.length, length: 1)
 
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: bracketStart)
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: bracketEnd)
-        storage.addAttributes([.font: syntaxFont, .foregroundColor: syntaxColor], range: urlRange)
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: closeParen)
+        let syntaxAttrs: [NSAttributedString.Key: Any] = [.font: syntaxFont, .foregroundColor: syntaxColor]
+        storage.addAttributes(syntaxAttrs, range: bracketStart)
+        storage.addAttributes(syntaxAttrs, range: bracketEnd)
+        storage.addAttributes(syntaxAttrs, range: urlRange)
+        storage.addAttributes(syntaxAttrs, range: closeParen)
     }
 
     private func applyStrikethroughStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
         let contentRange = match.range(at: 1)
-
-        // 删除线
-        storage.addAttribute(
-            .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: contentRange)
-
-        // 语法标记淡化
-        let startMarker = NSRange(location: fullRange.location, length: 2)
-        let endMarker = NSRange(location: fullRange.location + fullRange.length - 2, length: 2)
-        storage.addAttributes(
-            [.font: syntaxFont, .foregroundColor: syntaxColor], range: startMarker)
-        storage.addAttributes([.font: syntaxFont, .foregroundColor: syntaxColor], range: endMarker)
+        storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: contentRange)
+        applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 2)
     }
 
     private func applyBlockquoteStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {

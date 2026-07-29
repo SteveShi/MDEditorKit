@@ -188,7 +188,7 @@ public struct MarkdownConverter {
         case let .text(text):
             return text.htmlEscaped()
         case .softBreak:
-            return " "
+            return "<br />\n"
         case .lineBreak:
             return "<br />\n"
         case let .code(code):

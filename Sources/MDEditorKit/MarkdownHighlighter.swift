@@ -48,26 +48,37 @@ public final class MarkdownHighlighter: @unchecked Sendable {
     private lazy var patterns: [(regex: NSRegularExpression, style: HighlightStyle)] = {
         var p: [(NSRegularExpression, HighlightStyle)] = []
 
+        // 标题 # Heading
         if let r = try? NSRegularExpression(pattern: #"(?m)^ *(#{1,6}) *(.*)$"#) {
             p.append((r, .heading))
         }
 
-        if let r = try? NSRegularExpression(pattern: #"\*\*(.*?)\*\*"#) {
+        // 加粗斜体 ***text*** 或 ___text___
+        if let r = try? NSRegularExpression(pattern: #"(?:\*\*\*|___)(.*?)(?:\*\*\*|___)"#) {
+            p.append((r, .boldItalic))
+        }
+
+        // 加粗 **text** 或 __text__
+        if let r = try? NSRegularExpression(pattern: #"(?:\*\*|__)(.*?)(?:\*\*|__)"#) {
             p.append((r, .bold))
         }
 
-        if let r = try? NSRegularExpression(pattern: #"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)"#) {
+        // 斜体 *text* 或 _text_（支持中英文斜体及 _斜体_ 模式）
+        if let r = try? NSRegularExpression(pattern: #"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)|(?<!_)(?<!\w)_(?!_)(.*?)(?<!_)(?<!\w)_(?!_)"#) {
             p.append((r, .italic))
         }
 
+        // 行内代码 `code`
         if let r = try? NSRegularExpression(pattern: #"`([^`]*)`"#) {
             p.append((r, .inlineCode))
         }
 
+        // 链接 [text](url)
         if let r = try? NSRegularExpression(pattern: #"(?<!!)\[([^\]]*)\]\(([^)]*)\)"#) {
             p.append((r, .link))
         }
 
+        // 删除线 ~~text~~
         if let r = try? NSRegularExpression(pattern: #"~~(.*?)~~"#) {
             p.append((r, .strikethrough))
         }
@@ -93,7 +104,7 @@ public final class MarkdownHighlighter: @unchecked Sendable {
     }()
 
     private enum HighlightStyle {
-        case heading, bold, italic, inlineCode, link, strikethrough, blockquote, listMarker, image
+        case heading, bold, italic, boldItalic, inlineCode, link, strikethrough, blockquote, listMarker, image
     }
 
     // MARK: - Initializer
@@ -118,11 +129,9 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
         textStorage.beginEditing()
 
-        // 1. 【终极加固】重置视图基础样式，同时绝对保护图片附件
+        // 1. 重置视图基础样式，保护图片附件
         let baseStyle = createBaseParagraphStyle()
 
-        // 采用双重备份机制：
-        // a. 记录所有附件及其完整属性（包含 MarkdownSource）
         var attachments: [(range: NSRange, attrs: [NSAttributedString.Key: Any])] = []
         textStorage.enumerateAttribute(.attachment, in: lineRange, options: []) { val, range, _ in
             if val != nil {
@@ -131,7 +140,6 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             }
         }
 
-        // b. 执行全量重置
         textStorage.setAttributes(
             [
                 .font: baseFont,
@@ -139,39 +147,32 @@ public final class MarkdownHighlighter: @unchecked Sendable {
                 .paragraphStyle: baseStyle,
             ], range: lineRange)
 
-        // c. 精准还原附件
         for (range, attrs) in attachments {
             textStorage.addAttributes(attrs, range: range)
         }
 
-        // 使用 NSString 的 bridge 以最高效率运行正则（避免 Swift String 重复转换的性能损耗）
         let searchString = textSnapshot as String
 
-        // 2. 第一阶段：扫描所有非破坏性样式（颜色、加粗等）并记录需要破坏性替换的图片
+        // 2. 第一阶段：扫描所有样式
         for (regex, style) in patterns {
             regex.enumerateMatches(in: searchString, options: [], range: lineRange) { match, _, _ in
                 guard let match = match else { return }
 
                 if style == .image {
-                    // 图片会导致文本长度变化，记录之以便后续逆序处理
                     if let attrString = self.createImageAttachmentString(
                         for: match, in: textSnapshot)
                     {
                         imageReplacements.append((match.range, attrString))
                     }
                 } else {
-                    // 常规样式即时应用
                     self.applyStyle(style, to: textStorage, match: match, text: textSnapshot)
                 }
             }
         }
 
-        // 3. 第二阶段：从后往前替换图片附件
-        // 重要：逆序替换是解决“点击文档卡死”的核心技术。
+        // 3. 第二阶段：逆序替换图片附件
         if !imageReplacements.isEmpty {
             for (replaceRange, attrString) in imageReplacements.reversed() {
-                // 【性能拦截】检查指纹：如果目标字符已经是相同的附件且源码一致，则跳过替换。
-                // 这彻底杜绝了打字时因重复插入附件导致的布局重算和界面跳动。
                 var isAlreadyRendered = false
                 if replaceRange.length == 1 {
                     let currentAttrs = textStorage.attributes(
@@ -200,7 +201,6 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
     // MARK: - Public Helper Methods
 
-    /// 用于宿主同步 `typingAttributes` 中的前景色。
     public var foregroundNSColor: NSColor { textColor }
 
     public func createBaseParagraphStyle() -> NSMutableParagraphStyle {
@@ -221,6 +221,8 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             applyBoldStyle(to: storage, match: match)
         case .italic:
             applyItalicStyle(to: storage, match: match)
+        case .boldItalic:
+            applyBoldItalicStyle(to: storage, match: match)
         case .inlineCode:
             applyInlineCodeStyle(to: storage, match: match)
         case .link:
@@ -232,7 +234,6 @@ public final class MarkdownHighlighter: @unchecked Sendable {
         case .listMarker:
             applyListMarkerStyle(to: storage, match: match)
         case .image:
-            // 图片在 highlight 方法的第一阶段已通过 imageReplacements 接管
             break
         }
     }
@@ -243,11 +244,9 @@ public final class MarkdownHighlighter: @unchecked Sendable {
         let hashRange = match.range(at: 1)
         let level = hashRange.length
 
-        // 标题字体 - 基于用户选择的字体派生
         let multipliers: [CGFloat] = [2.0, 1.7, 1.5, 1.3, 1.2, 1.1]
         let fontSize = baseFont.pointSize * multipliers[min(level - 1, 5)]
 
-        // 尝试使用用户字体的粗体变体，如果没有则使用系统粗体
         let scaledFont =
             NSFont(descriptor: baseFont.fontDescriptor, size: fontSize)
             ?? NSFont.systemFont(ofSize: fontSize)
@@ -258,7 +257,6 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             NSFont(descriptor: boldDescriptor, size: fontSize)
             ?? NSFont.boldSystemFont(ofSize: fontSize)
 
-        // 1. 全量应用标题字体到整行（确保光标继承）
         let lineRange = text.lineRange(for: match.range)
         storage.addAttributes(
             [
@@ -266,7 +264,6 @@ public final class MarkdownHighlighter: @unchecked Sendable {
                 .foregroundColor: headingColor,
             ], range: lineRange)
 
-        // 2. 仅对符号部分进行染色淡化
         storage.addAttribute(.foregroundColor, value: syntaxColor, range: hashRange)
         storage.addAttribute(.font, value: syntaxFont, range: hashRange)
     }
@@ -281,18 +278,47 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
     private func applyBoldStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
+        var contentRange = fullRange
+        if match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound && match.range(at: 1).length > 0 {
+            contentRange = match.range(at: 1)
+        }
         let boldFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .boldFontMask)
-        storage.addAttribute(.font, value: boldFont, range: fullRange)
-        storage.addAttribute(.foregroundColor, value: emphasisColor, range: fullRange)
+        storage.addAttributes([.font: boldFont, .foregroundColor: emphasisColor], range: contentRange)
         applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 2)
     }
 
     private func applyItalicStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
-        let contentRange = match.range(at: 1)
+        var contentRange = fullRange
+        if match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound && match.range(at: 1).length > 0 {
+            contentRange = match.range(at: 1)
+        } else if match.numberOfRanges > 2 && match.range(at: 2).location != NSNotFound && match.range(at: 2).length > 0 {
+            contentRange = match.range(at: 2)
+        }
+
         let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-        storage.addAttributes([.font: italicFont, .foregroundColor: emphasisColor], range: contentRange)
+        storage.addAttributes([
+            .font: italicFont,
+            .foregroundColor: emphasisColor,
+            .obliqueness: 0.2 // CJK 中文斜体倾斜属性（解决 macOS 系统中中文字体没有原生斜体字形的问题）
+        ], range: contentRange)
         applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 1)
+    }
+
+    private func applyBoldItalicStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
+        let fullRange = match.range
+        var contentRange = fullRange
+        if match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound && match.range(at: 1).length > 0 {
+            contentRange = match.range(at: 1)
+        }
+
+        let boldItalicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: [.boldFontMask, .italicFontMask])
+        storage.addAttributes([
+            .font: boldItalicFont,
+            .foregroundColor: emphasisColor,
+            .obliqueness: 0.2
+        ], range: contentRange)
+        applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 3)
     }
 
     private func applyInlineCodeStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
@@ -336,11 +362,8 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
     private func applyBlockquoteStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let fullRange = match.range
-
-        // 引用样式使用主题中的 blockquote 色
         storage.addAttribute(.foregroundColor, value: blockquoteColor, range: fullRange)
 
-        // > 标记淡化
         let markerRange = NSRange(location: fullRange.location, length: 2)
         storage.addAttributes(
             [.font: syntaxFont, .foregroundColor: syntaxColor], range: markerRange)
@@ -348,220 +371,83 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
     private func applyListMarkerStyle(to storage: NSTextStorage, match: NSTextCheckingResult) {
         let markerRange = match.range(at: 2)
-        storage.addAttributes([.foregroundColor: syntaxColor], range: markerRange)
+        storage.addAttributes(
+            [.font: syntaxFont, .foregroundColor: syntaxColor], range: markerRange)
     }
 
     private func applyParserBackedStyles(to storage: NSTextStorage, lineRange: NSRange) {
-        let markdown = storage.string
-        guard !markdown.isEmpty else { return }
-
+        let text = (storage.string as NSString).substring(with: lineRange)
         let parser = MarkdownParser()
-        let result = parser.parse(markdown)
-        applyBlockStyles(result.document, to: storage, markdown: markdown as NSString, lineRange: lineRange)
-        applyMathStyles(result.mathContext.values, to: storage, markdown: markdown as NSString, lineRange: lineRange)
-    }
+        let result = parser.parse(text)
+        let ranges = parser.parseBlockRange(text)
 
-    private func applyBlockStyles(
-        _ blocks: [MarkdownBlockNode],
-        to storage: NSTextStorage,
-        markdown: NSString,
-        lineRange: NSRange
-    ) {
-        for block in blocks {
+        for (index, block) in result.document.enumerated() {
+            guard index < ranges.count else { break }
+            let relativeRange = ranges[index]
+
+            let absoluteLocation = lineRange.location + text.distance(from: text.startIndex, to: relativeRange.startIndex)
+            let absoluteLength = text.distance(from: relativeRange.startIndex, to: relativeRange.endIndex)
+            let absoluteRange = NSRange(location: absoluteLocation, length: absoluteLength)
+
+            guard absoluteRange.location != NSNotFound,
+                  absoluteRange.location + absoluteRange.length <= storage.length else { continue }
+
             switch block {
-            case .table:
-                applyTableStyle(to: storage, markdown: markdown, lineRange: lineRange)
-            case .taskList:
-                applyTaskListStyle(to: storage, markdown: markdown, lineRange: lineRange)
             case .codeBlock:
-                applyCodeBlockStyle(to: storage, markdown: markdown, lineRange: lineRange)
-            case let .blockquote(children):
-                applyBlockStyles(children, to: storage, markdown: markdown, lineRange: lineRange)
-            case let .bulletedList(_, items):
-                for item in items {
-                    applyBlockStyles(item.children, to: storage, markdown: markdown, lineRange: lineRange)
-                }
-            case let .numberedList(_, _, items):
-                for item in items {
-                    applyBlockStyles(item.children, to: storage, markdown: markdown, lineRange: lineRange)
-                }
+                storage.addAttribute(.backgroundColor, value: codeBlockBackground, range: absoluteRange)
             default:
                 break
             }
         }
     }
 
-    private func applyTableStyle(to storage: NSTextStorage, markdown: NSString, lineRange: NSRange) {
-        forEachLine(in: lineRange, markdown: markdown) { line, range in
-            guard line.contains("|") else { return }
-            storage.addAttributes(
-                [
-                    .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.92, weight: .regular),
-                    .foregroundColor: textColor,
-                ],
-                range: range
-            )
+    private func createImageAttachmentString(
+        for match: NSTextCheckingResult, in text: NSString
+    ) -> NSAttributedString? {
+        let fullRange = match.range
+        let fullSourceString = text.substring(with: fullRange)
+        let pathRange = match.range(at: 2)
+        let path = text.substring(with: pathRange)
 
-            if line.trimmingCharacters(in: .whitespaces).range(
-                of: #"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"#,
-                options: .regularExpression
-            ) != nil {
-                storage.addAttributes([.foregroundColor: syntaxColor], range: range)
-            }
+        var image: NSImage?
+        if let provider = imageProvider {
+            image = provider(path)
         }
-    }
 
-    private func applyTaskListStyle(to storage: NSTextStorage, markdown: NSString, lineRange: NSRange) {
-        forEachLine(in: lineRange, markdown: markdown) { line, range in
-            guard let checkboxRange = line.range(
-                of: #"^(\s*[-*+]\s+)\[[ xX]\]"#,
-                options: .regularExpression
-            ) else { return }
-
-            let nsLine = line as NSString
-            let checkboxNSRange = NSRange(checkboxRange, in: line)
-            let absoluteCheckboxRange = NSRange(
-                location: range.location + checkboxNSRange.location,
-                length: checkboxNSRange.length
-            )
-            storage.addAttributes(
-                [
-                    .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize, weight: .medium),
-                    .foregroundColor: linkColor,
-                ],
-                range: absoluteCheckboxRange
-            )
-
-            let isCompleted = nsLine.substring(with: checkboxNSRange).lowercased().contains("[x]")
-            if isCompleted {
-                let contentStart = checkboxNSRange.location + checkboxNSRange.length
-                let contentLength = max(0, nsLine.length - contentStart)
-                guard contentLength > 0 else { return }
-                storage.addAttributes(
-                    [
-                        .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                        .foregroundColor: syntaxColor,
-                    ],
-                    range: NSRange(location: range.location + contentStart, length: contentLength)
-                )
-            }
-        }
-    }
-
-    private func applyCodeBlockStyle(to storage: NSTextStorage, markdown: NSString, lineRange: NSRange) {
-        guard let regex = try? NSRegularExpression(
-            pattern: #"(?ms)^(```|~~~)[^\n]*\n.*?\n\1\s*$"#,
-            options: [.anchorsMatchLines]
-        ) else { return }
-
-        regex.enumerateMatches(
-            in: markdown as String,
-            options: [],
-            range: NSRange(location: 0, length: markdown.length)
-        ) { match, _, _ in
-            guard let match, NSIntersectionRange(match.range, lineRange).length > 0 else { return }
-            storage.addAttributes(
-                [
-                    .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.92, weight: .regular),
-                    .foregroundColor: codeColor,
-                    .backgroundColor: codeBlockBackground,
-                ],
-                range: match.range
-            )
-        }
-    }
-
-    private func applyMathStyles(
-        _ mathContents: Dictionary<Int, String>.Values,
-        to storage: NSTextStorage,
-        markdown: NSString,
-        lineRange: NSRange
-    ) {
-        for content in mathContents where !content.isEmpty {
-            let escapedContent = NSRegularExpression.escapedPattern(for: content)
-            let patterns = [
-                #"\$\$\s*\#(escapedContent)\s*\$\$"#,
-                #"\$\s*\#(escapedContent)\s*\$"#,
-                #"\\\[\s*\#(escapedContent)\s*\\\]"#,
-                #"\\\(\s*\#(escapedContent)\s*\\\)"#,
-            ]
-
-            for pattern in patterns {
-                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-                regex.enumerateMatches(
-                    in: markdown as String,
-                    options: [],
-                    range: NSRange(location: 0, length: markdown.length)
-                ) { match, _, _ in
-                    guard let match, NSIntersectionRange(match.range, lineRange).length > 0 else { return }
-                    storage.addAttributes(
-                        [
-                            .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.95, weight: .regular),
-                            .foregroundColor: linkColor,
-                            .backgroundColor: codeBackground,
-                        ],
-                        range: match.range
-                    )
-                }
-            }
-        }
-    }
-
-    private func forEachLine(
-        in lineRange: NSRange,
-        markdown: NSString,
-        _ body: (_ line: String, _ range: NSRange) -> Void
-    ) {
-        var location = lineRange.location
-        let upperBound = min(lineRange.location + lineRange.length, markdown.length)
-
-        while location < upperBound {
-            let currentLineRange = markdown.lineRange(
-                for: NSRange(location: location, length: 0)
-            )
-            let effectiveRange = NSIntersectionRange(currentLineRange, lineRange)
-            guard effectiveRange.length > 0 else {
-                location = currentLineRange.location + currentLineRange.length
-                continue
-            }
-            body(markdown.substring(with: effectiveRange), effectiveRange)
-            location = currentLineRange.location + currentLineRange.length
-        }
-    }
-
-    private func createImageAttachmentString(for match: NSTextCheckingResult, in text: NSString)
-        -> NSAttributedString?
-    {
-        let matchRange = match.range
-        let linkRange = match.range(at: 2)
-        let path = text.substring(with: linkRange)
-        let originalMarkdown = text.substring(with: matchRange)
-
-        // 尝试通过宿主提供的 imageProvider 加载
-        if let image = imageProvider?(path) {
-            let attachment = NSTextAttachment()
-            attachment.image = image
-
-            // 智能缩放保持 Ulysses 均衡感
-            let maxWidth: CGFloat = 800
-            let size = image.size
-            if size.width > maxWidth {
-                let scale = maxWidth / size.width
-                attachment.bounds = CGRect(x: 0, y: 0, width: maxWidth, height: size.height * scale)
+        if image == nil {
+            if path.hasPrefix("http://") || path.hasPrefix("https://") {
+                image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
             } else {
-                attachment.bounds = CGRect(origin: .zero, size: size)
+                let fileURL = URL(fileURLWithPath: path)
+                image = NSImage(contentsOf: fileURL)
             }
-
-            // 【核心修复】创建带源码备份的附件字符
-            let attrString = NSMutableAttributedString(attachment: attachment)
-            // 该属性由 MDEditorView.Coordinator.reconstructMarkdown 读取，确保同步时数据完整
-            attrString.addAttribute(
-                NSAttributedString.Key("MarkdownSource"), value: originalMarkdown,
-                range: NSRange(location: 0, length: 1))
-
-            return attrString
         }
-        return nil
-    }
 
+        guard let validImage = image else { return nil }
+
+        let attachment = NSTextAttachment()
+        attachment.image = validImage
+
+        let maxImageWidth: CGFloat = 500
+        let imageSize = validImage.size
+
+        if imageSize.width > maxImageWidth {
+            let aspectRatio = imageSize.height / imageSize.width
+            attachment.bounds = CGRect(
+                x: 0, y: 0, width: maxImageWidth, height: maxImageWidth * aspectRatio)
+        } else {
+            attachment.bounds = CGRect(x: 0, y: 0, width: imageSize.width, height: imageSize.height)
+        }
+
+        let attrString = NSMutableAttributedString(attachment: attachment)
+
+        attrString.addAttributes(
+            [
+                .font: baseFont,
+                .foregroundColor: textColor,
+                NSAttributedString.Key("MarkdownSource"): fullSourceString,
+            ], range: NSRange(location: 0, length: attrString.length))
+
+        return attrString
+    }
 }

@@ -114,7 +114,7 @@ public struct EditorTheme: Sendable, Equatable, Hashable {
         foreground: EditorThemeColor(white: 0.88),
         heading: EditorThemeColor(white: 1.00),
         syntaxMarker: EditorThemeColor(white: 0.55, alpha: 0.65),
-        emphasis: EditorThemeColor(white: 0.92),
+        emphasis: EditorThemeColor(white: 0.88),
         inlineCode: EditorThemeColor(red: 1.00, green: 0.60, blue: 0.60),
         inlineCodeBackground: EditorThemeColor(white: 0.18),
         codeBlockBackground: EditorThemeColor(white: 0.18),

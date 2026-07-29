@@ -53,18 +53,23 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             p.append((r, .heading))
         }
 
-        // 加粗斜体 ***text*** 或 ___text___
-        if let r = try? NSRegularExpression(pattern: #"(?:\*\*\*|___)(.*?)(?:\*\*\*|___)"#) {
+        // 分割线 --- 或 *** 或 ___
+        if let r = try? NSRegularExpression(pattern: #"(?m)^ *(?:-{3,}|\*{3,}|_{3,}) *$"#) {
+            p.append((r, .horizontalRule))
+        }
+
+        // 加粗斜体 ***text*** 或 ___text___（单行限制）
+        if let r = try? NSRegularExpression(pattern: #"(?:\*\*\*|___)([^\n]+?)(?:\*\*\*|___)"#) {
             p.append((r, .boldItalic))
         }
 
-        // 加粗 **text** 或 __text__
-        if let r = try? NSRegularExpression(pattern: #"(?:\*\*|__)(.*?)(?:\*\*|__)"#) {
+        // 加粗 **text** 或 __text__（单行限制）
+        if let r = try? NSRegularExpression(pattern: #"(?:\*\*|__)([^\n]+?)(?:\*\*|__)"#) {
             p.append((r, .bold))
         }
 
-        // 斜体 *text* 或 _text_（支持中英文斜体及 _斜体_ 模式）
-        if let r = try? NSRegularExpression(pattern: #"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)|(?<!_)(?<!\w)_(?!_)(.*?)(?<!_)(?<!\w)_(?!_)"#) {
+        // 斜体 *text* 或 _text_（单行限制，支持中英文斜体）
+        if let r = try? NSRegularExpression(pattern: #"(?<!\*)\*(?!\*)([^\*\n]+?)(?<!\*)\*(?!\*)|(?<!_)(?<!\w)_(?!_)([^_\n]+?)(?<!_)(?<!\w)_(?!_)"#) {
             p.append((r, .italic))
         }
 
@@ -79,7 +84,7 @@ public final class MarkdownHighlighter: @unchecked Sendable {
         }
 
         // 删除线 ~~text~~
-        if let r = try? NSRegularExpression(pattern: #"~~(.*?)~~"#) {
+        if let r = try? NSRegularExpression(pattern: #"~~([^\n]+?)~~"#) {
             p.append((r, .strikethrough))
         }
 
@@ -88,9 +93,9 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             p.append((r, .blockquote))
         }
 
-        // 列表标记 - 或 1.
+        // 任务列表与列表标记 - 或 1. 或 - [ ]
         if let r = try? NSRegularExpression(
-            pattern: #"^(\s*)([-*+]|\d+\.)\s"#, options: .anchorsMatchLines)
+            pattern: #"^(\s*)([-*+](\s+\[[ xX]\])?|\d+\.)\s"#, options: .anchorsMatchLines)
         {
             p.append((r, .listMarker))
         }
@@ -104,7 +109,7 @@ public final class MarkdownHighlighter: @unchecked Sendable {
     }()
 
     private enum HighlightStyle {
-        case heading, bold, italic, boldItalic, inlineCode, link, strikethrough, blockquote, listMarker, image
+        case heading, bold, italic, boldItalic, inlineCode, link, strikethrough, blockquote, listMarker, image, horizontalRule
     }
 
     // MARK: - Initializer
@@ -233,6 +238,8 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             applyBlockquoteStyle(to: storage, match: match)
         case .listMarker:
             applyListMarkerStyle(to: storage, match: match)
+        case .horizontalRule:
+            storage.addAttributes([.foregroundColor: syntaxColor, .font: syntaxFont], range: match.range)
         case .image:
             break
         }
@@ -394,7 +401,12 @@ public final class MarkdownHighlighter: @unchecked Sendable {
 
             switch block {
             case .codeBlock:
-                storage.addAttribute(.backgroundColor, value: codeBlockBackground, range: absoluteRange)
+                let monoFont = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.9, weight: .regular)
+                storage.addAttributes([
+                    .backgroundColor: codeBlockBackground,
+                    .font: monoFont,
+                    .foregroundColor: codeColor
+                ], range: absoluteRange)
             default:
                 break
             }

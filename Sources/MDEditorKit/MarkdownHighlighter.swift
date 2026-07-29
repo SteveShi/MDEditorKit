@@ -303,11 +303,17 @@ public final class MarkdownHighlighter: @unchecked Sendable {
             contentRange = match.range(at: 2)
         }
 
+        // 尝试获取斜体字形；中文字体通常无斜体字形，convert 后返回原字体
         let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
+        let hasTrueItalic = NSFontManager.shared.traits(of: italicFont).contains(.italicFontMask)
+
+        // CJK 字体无原生斜体时使用较大的 obliqueness 值使倾斜效果清晰可辨
+        let obliquenessValue: Double = hasTrueItalic ? 0.0 : 0.3
+
         storage.addAttributes([
             .font: italicFont,
             .foregroundColor: emphasisColor,
-            .obliqueness: 0.2 // CJK 中文斜体倾斜属性（解决 macOS 系统中中文字体没有原生斜体字形的问题）
+            .obliqueness: obliquenessValue
         ], range: contentRange)
         applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 1)
     }
@@ -320,10 +326,13 @@ public final class MarkdownHighlighter: @unchecked Sendable {
         }
 
         let boldItalicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: [.boldFontMask, .italicFontMask])
+        let hasTrueItalic = NSFontManager.shared.traits(of: boldItalicFont).contains(.italicFontMask)
+        let obliquenessValue: Double = hasTrueItalic ? 0.0 : 0.3
+
         storage.addAttributes([
             .font: boldItalicFont,
             .foregroundColor: emphasisColor,
-            .obliqueness: 0.2
+            .obliqueness: obliquenessValue
         ], range: contentRange)
         applyMarkerFade(to: storage, fullRange: fullRange, markerLength: 3)
     }

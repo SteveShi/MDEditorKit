@@ -12,12 +12,13 @@ XCFRAMEWORK_PATH="${OUTPUT_DIR}/${FRAMEWORK_NAME}.xcframework"
 ZIP_PATH="${OUTPUT_DIR}/${FRAMEWORK_NAME}.xcframework.zip"
 
 # 1. Generate Xcode Project
-echo "==> Generating Xcode project using xcodegen..."
-if ! command -v xcodegen &> /dev/null; then
-    echo "xcodegen not found, install with: brew install xcodegen"
+echo "==> Generating Xcode project using tuist..."
+if ! command -v tuist &> /dev/null; then
+    echo "tuist not found, install with: mise install tuist"
     exit 1
 fi
-xcodegen generate
+tuist install
+tuist generate --no-open
 
 # 2. Clean previous builds
 echo "==> Cleaning old build artifacts..."

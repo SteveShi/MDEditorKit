@@ -24,10 +24,10 @@ jobs:
         with:
           xcode-version: 'latest-stable'
 
-      - name: Install xcodegen
+      - name: Install tuist
         run: |
           brew update
-          brew install xcodegen xcbeautify
+          brew install tuist xcbeautify
 
       - name: Build XCFramework
         run: |

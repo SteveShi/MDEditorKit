@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "MDEditorKit", targets: ["MDEditorKit"])
     ],
     dependencies: [
-        .package(url: "https://github.com/SteveShi/MarkdownView.git", from: "1.0.0"),
+        .package(url: "https://github.com/Lakr233/MarkdownView.git", from: "4.3.1"),
     ],
     targets: [
         .target(

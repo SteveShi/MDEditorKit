@@ -3,7 +3,7 @@ import ProjectDescription
 let project = Project(
     name: "MDEditorKit",
     packages: [
-        .package(url: "https://github.com/SteveShi/MarkdownView.git", from: "1.0.0")
+        .package(url: "https://github.com/Lakr233/MarkdownView.git", from: "4.3.1")
     ],
     targets: [
         .target(

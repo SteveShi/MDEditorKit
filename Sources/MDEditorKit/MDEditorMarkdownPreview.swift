@@ -6,7 +6,7 @@
 import SwiftUI
 import MarkdownView
 
-/// Read-only Markdown renderer backed by SteveShi/MarkdownView.
+/// Read-only Markdown renderer backed by Lakr233/MarkdownView.
 ///
 /// MDEditorView keeps owning the TextKit editing path used by MDWriter's
 /// WYSIWYG editor. This view is intentionally separate so host apps can opt in

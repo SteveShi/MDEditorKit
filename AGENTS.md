@@ -119,7 +119,7 @@ open MDEditorKit.xcodeproj
 
 ### Dependencies
 
-- **MarkdownView** (https://github.com/SteveShi/MarkdownView.git, from: 1.0.0)
+- **MarkdownView** (https://github.com/Lakr233/MarkdownView.git, from: 4.3.1)
   - Provides `MarkdownView` and `MarkdownParser` products
   - Used for Markdown parsing and preview rendering
 

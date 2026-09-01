@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.2.0
+
+### Upgraded
+- Switched `MarkdownView` dependency from personal fork to upstream `Lakr233/MarkdownView` (v4.3.1), bringing incremental block fragment caching, streaming rendering improvements, macOS nested vertical scroll passthrough, and native table geometry adaptations.
+
+---
+
+### 升级
+- 将 `MarkdownView` 依赖由个人 Fork 切换至上游官方仓库 `Lakr233/MarkdownView` (v4.3.1)，引入增量块级缓存、流式渲染优化、macOS 代码块滚轮事件穿透及原生自适应点阵表格布局。
+
 ## 2.1.0
 
 ### Optimized

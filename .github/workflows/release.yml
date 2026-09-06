@@ -17,17 +17,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Select Xcode
         uses: SteveShi/setup-xcode@v2
         with:
           xcode-version: 'latest-stable'
 
-      - name: Install tuist
-        run: |
-          brew update
-          brew install tuist xcbeautify
+      - name: Setup Tuist
+        uses: jdx/mise-action@v4
+
+      - name: Install xcbeautify
+        run: brew install xcbeautify
 
       - name: Build XCFramework
         run: |

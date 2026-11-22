@@ -23,7 +23,14 @@ let project = Project(
                 base: [
                     "BUILD_LIBRARY_FOR_DISTRIBUTION": "YES",
                     "SKIP_INSTALL": "NO",
-                    "DEFINES_MODULE": "YES"
+                    "DEFINES_MODULE": "YES",
+                    "SWIFT_VERIFY_EMITTED_MODULE_INTERFACE": "NO",
+                    "OTHER_SWIFT_FLAGS": [
+                        "$(inherited)",
+                        "-no-verify-emitted-module-interface",
+                        "-enable-experimental-feature",
+                        "Lifetimes"
+                    ]
                 ]
             )
         )

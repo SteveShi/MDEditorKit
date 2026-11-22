@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.3.1
+
+### Fixed
+- Moved `SWIFT_VERIFY_EMITTED_MODULE_INTERFACE` and `OTHER_SWIFT_FLAGS` (`$(inherited)`) into the `MDEditorKit` target settings in `Project.swift` instead of passing `OTHER_SWIFT_FLAGS` globally on the `xcodebuild archive` command line in `build_xcframework.sh`, preventing XCFramework builds from overriding `swift-collections`'s `-enable-builtin-module` flag (`no such module 'Builtin'`).
+
+---
+
+### 修复
+- 将 `SWIFT_VERIFY_EMITTED_MODULE_INTERFACE` 与带 `$(inherited)` 的 `OTHER_SWIFT_FLAGS` 收拢至 `Project.swift` 的 `MDEditorKit` target 配置中，不再在 `build_xcframework.sh` 的 `xcodebuild archive` 命令行全局覆写 `OTHER_SWIFT_FLAGS`，修复构建 XCFramework 时覆盖上游 `swift-collections` 的 `-enable-builtin-module` 导致的 `no such module 'Builtin'` 报错。
+
 ## 2.3.0
 
 ### Added

@@ -7,7 +7,7 @@
 
 import AppKit
 import Foundation
-import SwiftMath
+internal import SwiftMath
 
 /// 渲染后的 LaTeX 数学公式图像与基线排版信息。
 public struct RenderedMath {

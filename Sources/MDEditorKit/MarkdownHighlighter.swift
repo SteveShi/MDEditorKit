@@ -9,7 +9,7 @@
 //
 
 import AppKit
-import MarkdownParser
+internal import MarkdownParser
 
 /// Markdown 语法高亮器
 @MainActor

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import MarkdownParser
+internal import MarkdownParser
 
 public struct MarkdownDocumentHeader: Sendable, Hashable {
     public let level: Int

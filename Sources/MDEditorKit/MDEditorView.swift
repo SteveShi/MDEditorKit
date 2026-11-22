@@ -8,7 +8,7 @@ import Combine
 import SwiftUI
 
 /// MDEditor 模块的公开视图
-/// 使用 TextKit 2 实现 Ulysses 风格的所见即所得编辑
+/// 实现 Ulysses 风格的所见即所得 Markdown 编辑体验
 public struct MDEditorView: NSViewRepresentable {
 
     // MARK: - Properties
@@ -42,27 +42,23 @@ public struct MDEditorView: NSViewRepresentable {
         public func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
 
-            // 关键：不再暴力过滤，而是通过属性还原完整的 Markdown 源码
-            // 这解决了由于图片替换为占位符导致的 SwiftUI 数据丢失且触发死循环的问题
             let reconstructed = reconstructMarkdown(from: textView.textStorage)
 
             if !isUpdatingFromSwiftUI && reconstructed != parent.text {
                 parent.text = reconstructed
             }
-            // 广播文本变化：宿主可在此挂载防抖自动保存、字数刷新、AI 监听等副作用。
             parent.proxy.onTextChange?(reconstructed)
         }
 
-        /// 从富文本中还原 Markdown 源码，处理被替换为图片的附件。
-        private func reconstructMarkdown(from textStorage: NSTextStorage?) -> String {
+        /// 从富文本中还原 Markdown 源码，处理被替换为图片或 LaTeX 数学公式的附件。
+        func reconstructMarkdown(from textStorage: NSTextStorage?) -> String {
             guard let textStorage = textStorage else { return "" }
             var result = ""
 
             textStorage.enumerateAttributes(
                 in: NSRange(location: 0, length: textStorage.length), options: []
             ) { attrs, range, _ in
-                // 检查是否存在我们在 MarkdownHighlighter 中存入的源码备份
-                if let source = attrs[NSAttributedString.Key("MarkdownSource")] as? String {
+                if let source = attrs[MarkdownTextActor.markdownSourceKey] as? String {
                     result += source
                 } else {
                     result += (textStorage.string as NSString).substring(with: range)
@@ -73,29 +69,38 @@ public struct MDEditorView: NSViewRepresentable {
 
         public func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
-            textView.updateTypingAttributes()
+            textView.handleSelectionDidChange()
 
-            // 触发打字机模式滚动
-            textView.scrollToCenter()
+            // 触发打字机模式滚动（若用户正在手动滚轮浏览，内部自动跳过）
+            textView.scrollToAnchorIfNeeded()
 
-            // 向上层广播选区/光标变化（包含纯光标移动），用于上下文敏感 UI
+            // 向上层广播轻量上下文与（按需）选区变化
             notifySelectionChange(in: textView)
         }
 
-        /// 把当前选区与完整文本派发给 proxy.onSelectionChange。
-        /// 注意：完整文本会通过 `reconstructMarkdown` 还原（与 textDidChange 走同一路径），
-        /// 让外部拿到的总是 Markdown 源码而不是带占位符的富文本。
+        /// 派发轻量级 `onCursorContextChange`（零全文重构），
+        /// 仅在宿主实际订阅了 `onSelectionChange` 时才还原全文字符串。
         func notifySelectionChange(in textView: MarkdownTextView) {
-            guard let callback = parent.proxy.onSelectionChange else { return }
-            let range = textView.selectedRange()
-            let text = reconstructMarkdown(from: textView.textStorage)
-            callback(range, text)
+            if let contextCallback = parent.proxy.onCursorContextChange {
+                let context = textView.currentCursorContext()
+                contextCallback(context)
+            }
+
+            if let legacyCallback = parent.proxy.onSelectionChange {
+                let range = textView.selectedRange()
+                let text = reconstructMarkdown(from: textView.textStorage)
+                legacyCallback(range, text)
+            }
         }
 
         // MARK: - Proxy Sync
 
         func setupProxyActions() {
             guard let textView = textView else { return }
+
+            textView.onEntityActivate = { [weak self] entity in
+                self?.parent.proxy.onEntityActivate?(entity)
+            }
 
             parent.proxy.insertTextAction = { [weak textView] text in
                 guard let tv = textView else { return }
@@ -109,6 +114,10 @@ public struct MDEditorView: NSViewRepresentable {
                 let selectedText = (tv.string as NSString).substring(with: range)
                 let newText = "\(prefix)\(selectedText)\(suffix)"
                 tv.insertText(newText, replacementRange: range)
+                if range.length == 0 {
+                    let caret = range.location + (prefix as NSString).length
+                    tv.setSelectedRange(NSRange(location: caret, length: 0))
+                }
             }
 
             parent.proxy.getSelectedTextAction = { [weak textView] in
@@ -128,7 +137,6 @@ public struct MDEditorView: NSViewRepresentable {
 
             parent.proxy.replaceRangeAction = { [weak textView] range, replacement in
                 guard let tv = textView else { return }
-                // 走 insertText 让 NSTextView 处理撤销栈与代理回调
                 let length = (tv.string as NSString).length
                 let clamped = NSRange(
                     location: max(0, min(range.location, length)),
@@ -210,8 +218,6 @@ public struct MDEditorView: NSViewRepresentable {
                 textView?.apply(theme: theme)
             }
 
-            // MARK: New APIs (1.8.0)
-
             // —— 行级 helpers
             parent.proxy.getCurrentLineRangeAction = { [weak textView] in
                 guard let tv = textView else { return NSRange(location: 0, length: 0) }
@@ -275,19 +281,8 @@ public struct MDEditorView: NSViewRepresentable {
 
             // —— 光标矩形（窗口坐标系）
             parent.proxy.caretFrameInWindowAction = { [weak textView] in
-                guard let tv = textView,
-                      let layoutManager = tv.layoutManager,
-                      let textContainer = tv.textContainer else { return nil }
-                let selected = tv.selectedRange()
-                let caretRange = NSRange(location: selected.location, length: 0)
-                let glyphRange = layoutManager.glyphRange(
-                    forCharacterRange: caretRange, actualCharacterRange: nil)
-                var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-                rect.origin.x += tv.textContainerOrigin.x
-                rect.origin.y += tv.textContainerOrigin.y
-                // textView → window
-                let inView = tv.convert(rect, to: nil)
-                return inView
+                guard let tv = textView else { return nil }
+                return tv.caretBoundingFrameInWindow()
             }
 
             // —— 选择辅助
@@ -323,7 +318,6 @@ public struct MDEditorView: NSViewRepresentable {
                 if text.isEmpty {
                     lineCount = 0
                 } else {
-                    // 末尾换行也算作一行的结束，与 wc -l 等工具一致
                     lineCount = text.reduce(into: 1) { acc, ch in
                         if ch == "\n" { acc += 1 }
                     } - (text.last == "\n" ? 1 : 0)
@@ -363,6 +357,44 @@ public struct MDEditorView: NSViewRepresentable {
                 guard let tv = textView else { return }
                 applyIndent(to: tv, outdent: true)
             }
+
+            // —— 段落上下移动（⌥⌘↑ / ⌥⌘↓）
+            parent.proxy.moveParagraphUpAction = { [weak textView] in
+                textView?.moveCurrentParagraph(up: true)
+            }
+            parent.proxy.moveParagraphDownAction = { [weak textView] in
+                textView?.moveCurrentParagraph(up: false)
+            }
+
+            // —— LaTeX 公式插入
+            parent.proxy.insertInlineMathAction = { [weak textView] expr in
+                guard let tv = textView else { return }
+                let range = tv.selectedRange()
+                let selected = (tv.string as NSString).substring(with: range)
+                let body = !expr.isEmpty ? expr : selected
+                if body.isEmpty {
+                    tv.insertText("$$", replacementRange: range)
+                    tv.setSelectedRange(NSRange(location: range.location + 1, length: 0))
+                } else {
+                    tv.insertText("$\(body)$", replacementRange: range)
+                }
+            }
+            parent.proxy.insertDisplayMathAction = { [weak textView] expr in
+                guard let tv = textView else { return }
+                let range = tv.selectedRange()
+                let selected = (tv.string as NSString).substring(with: range)
+                let body = !expr.isEmpty ? expr : selected
+                let block = "$$\n\(body)\n$$"
+                tv.insertText(block, replacementRange: range)
+                if body.isEmpty {
+                    tv.setSelectedRange(NSRange(location: range.location + 3, length: 0))
+                }
+            }
+
+            // —— 激活当前实体气泡
+            parent.proxy.activateEntityAtCaretAction = { [weak textView] in
+                textView?.activateEntityAtCaret()
+            }
         }
     }
 
@@ -400,8 +432,7 @@ public struct MDEditorView: NSViewRepresentable {
 
         context.coordinator.setupProxyActions()
 
-        // 视图挂载后立即派发一次初始选区，确保上层 UI（如上下文敏感工具栏）
-        // 在没有任何用户输入前也能进入正确状态。
+        // 视图挂载后立即派发一次初始上下文，确保上层 UI 在无输入前就处于正确状态
         DispatchQueue.main.async { [weak coordinator = context.coordinator] in
             guard let coordinator = coordinator, let tv = coordinator.textView else { return }
             coordinator.notifySelectionChange(in: tv)
@@ -413,33 +444,28 @@ public struct MDEditorView: NSViewRepresentable {
     public func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? MarkdownTextView else { return }
 
-        // 1. 焦点绝对同步锁定：如果用户正在打字（是第一响应者），绝对禁止强制同步文本、配置或主题
-        // 这彻底防止了打字过程中因 State 更新导致的反向刷新、跳动和光标丢失
+        // 始终允许同步视图配置与主题（例如通过菜单快捷键实时切换专注模式/打字机锚点/公式渲染），
+        // 内部有严格的等值短路防抖，不会在无变化时触发刷新。
+        textView.applyConfiguration(configuration)
+        textView.apply(theme: configuration.theme)
+
+        // 焦点输入锁定：用户正在打字时绝对禁止从 SwiftUI Binding 反向覆盖正文
         if textView.window?.firstResponder == textView {
             return
         }
 
-        // 2. 只有在非输入状态下，才同步配置与主题
-        textView.applyConfiguration(configuration)
-        textView.apply(theme: configuration.theme)
-
-        // 3. 干净对比同步：剔除富文本占位符，避免冗余刷新
-        let currentCleanText = textView.string.replacingOccurrences(of: "\u{FFFC}", with: "")
-
-        if !context.coordinator.isUpdatingFromSwiftUI && currentCleanText != text {
+        let currentReconstructed = context.coordinator.reconstructMarkdown(from: textView.textStorage)
+        if !context.coordinator.isUpdatingFromSwiftUI && currentReconstructed != text {
             context.coordinator.isUpdatingFromSwiftUI = true
 
-            // 备份光标
             let selectedRange = textView.selectedRange()
-
-            // 执行同步
             textView.string = text
             textView.highlightMarkdown()
 
-            // 恢复光标（如果在内容长度内）
-            if selectedRange.location + selectedRange.length <= text.count {
-                textView.setSelectedRange(selectedRange)
-            }
+            let maxLen = (textView.string as NSString).length
+            let safeLoc = min(selectedRange.location, maxLen)
+            let safeLen = min(selectedRange.length, maxLen - safeLoc)
+            textView.setSelectedRange(NSRange(location: safeLoc, length: safeLen))
 
             context.coordinator.isUpdatingFromSwiftUI = false
         }
@@ -450,43 +476,152 @@ public struct MDEditorView: NSViewRepresentable {
 
 class MarkdownTextView: NSTextView {
     private lazy var highlighter = MarkdownHighlighter()
+    private let actor = MarkdownTextActor()
     private var isHighlighting = false
     private var currentConfiguration: EditorConfiguration?
+    private var isUserScrollingManually = false
+    private var lastSelectionLineRange: NSRange?
+
+    var onEntityActivate: ((EditorEntityInfo) -> Void)?
+
+    // MARK: - Editing Semantics Overrides
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
-        guard let string = string as? String, !string.isEmpty else {
-            super.insertText(string, replacementRange: replacementRange)
+        isUserScrollingManually = false
+        if let str = string as? String, !str.isEmpty {
+            let handled = actor.handleInsertText(str, replacementRange: replacementRange, in: self) {
+                inserted, range in
+                super.insertText(inserted, replacementRange: range)
+            }
+            if handled { return }
+        }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        isUserScrollingManually = false
+        if actor.handleInsertNewline(in: self) {
             return
         }
+        super.insertNewline(sender)
+    }
 
-        let pairs: [String: String] = ["*": "*", "_": "_", "`": "`", "~": "~", "[": "]", "(": ")"]
-        if let pairEnd = pairs[string] {
-            let range = selectedRange()
-            if range.length > 0 {
-                let selectedText = (self.string as NSString).substring(with: range)
-                let wrapped = "\(string)\(selectedText)\(pairEnd)"
-                super.insertText(wrapped, replacementRange: range)
-                return
-            } else {
-                let fullPair = string == "~" ? "~~~~" : "\(string)\(pairEnd)"
-                super.insertText(fullPair, replacementRange: range)
-                let offset = string == "~" ? 2 : 1
-                self.setSelectedRange(NSRange(location: range.location + offset, length: 0))
+    override func deleteBackward(_ sender: Any?) {
+        isUserScrollingManually = false
+        if actor.handleDeleteBackward(in: self) {
+            return
+        }
+        super.deleteBackward(sender)
+    }
+
+    override func moveToBeginningOfLine(_ sender: Any?) {
+        if actor.handleMoveToBeginningOfLine(extendingSelection: false, in: self) {
+            return
+        }
+        super.moveToBeginningOfLine(sender)
+    }
+
+    override func moveToBeginningOfLineAndModifySelection(_ sender: Any?) {
+        if actor.handleMoveToBeginningOfLine(extendingSelection: true, in: self) {
+            return
+        }
+        super.moveToBeginningOfLineAndModifySelection(sender)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        isUserScrollingManually = false
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // ⌥⌘↑ / ⌥⌘↓ 段落上下移动
+        if flags == [.option, .command] {
+            if event.keyCode == 126 { // Up Arrow
+                if actor.moveParagraph(up: true, in: self) { return }
+            } else if event.keyCode == 125 { // Down Arrow
+                if actor.moveParagraph(up: false, in: self) { return }
+            }
+        }
+
+        super.keyDown(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if abs(event.scrollingDeltaY) > 0.5 {
+            isUserScrollingManually = true
+        }
+        super.scrollWheel(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+        let charIndex = characterIndexForInsertion(at: localPoint)
+
+        // 单击已渲染的数学公式/图片附件，或 Command+点击链接 → 触发内联实体编辑气泡
+        if let storage = textStorage, charIndex < storage.length {
+            let attrs = storage.attributes(at: charIndex, effectiveRange: nil)
+            let isAttachmentEntity = attrs[MarkdownTextActor.markdownSourceKey] != nil
+            let isCommandClick = event.modifierFlags.contains(.command)
+
+            if isAttachmentEntity || isCommandClick {
+                super.mouseDown(with: event)
+                if let entity = actor.detectEntity(at: charIndex, in: self) {
+                    onEntityActivate?(entity)
+                }
                 return
             }
         }
 
-        super.insertText(string, replacementRange: replacementRange)
+        super.mouseDown(with: event)
     }
+
+    // MARK: - Current Line Highlight Background
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+
+        guard let config = currentConfiguration,
+              config.highlightCurrentLine,
+              selectedRange().length == 0,
+              let layoutManager = layoutManager,
+              let textContainer = textContainer
+        else { return }
+
+        let nsText = string as NSString
+        let selLoc = min(selectedRange().location, nsText.length)
+
+        var lineRect: NSRect = .zero
+        if nsText.length == 0 {
+            lineRect = layoutManager.extraLineFragmentRect
+        } else if selLoc == nsText.length && nsText.substring(from: nsText.length - 1) == "\n" {
+            lineRect = layoutManager.extraLineFragmentRect
+        } else {
+            let safeChar = min(selLoc, max(0, nsText.length - 1))
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: safeChar)
+            if glyphIndex < layoutManager.numberOfGlyphs {
+                lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+            }
+        }
+
+        guard lineRect.height > 0 else { return }
+        let origin = textContainerOrigin
+        let highlightRect = NSRect(
+            x: origin.x - 8,
+            y: lineRect.origin.y + origin.y,
+            width: textContainer.containerSize.width + 16,
+            height: lineRect.height
+        )
+        if highlightRect.intersects(rect) {
+            let highlightColor = config.theme.foreground.nsColor.withAlphaComponent(0.045)
+            highlightColor.setFill()
+            NSBezierPath(roundedRect: highlightRect, xRadius: 5, yRadius: 5).fill()
+        }
+    }
+
+    // MARK: - Text Change & Highlighting
 
     override func didChangeText() {
         super.didChangeText()
-        if !hasMarkedText() && !isHighlighting {  // 锁住递归
-            // 优先使用 textStorage 的 editedRange，它是最准确的变更范围
-            // 如果不可用，回退到 rangeForUserTextChange
+        if !hasMarkedText() && !isHighlighting {
             let range = textStorage?.editedRange ?? rangeForUserTextChange
-
-            // 确保 range 有效，否则全量高亮
             if range.location != NSNotFound {
                 highlightMarkdown(in: range)
             } else {
@@ -507,24 +642,122 @@ class MarkdownTextView: NSTextView {
         defer { isHighlighting = false }
 
         let text = textStorage.string as NSString
-        let lineRange = text.lineRange(for: range)
+        let safeRange = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+        guard safeRange.length > 0 || text.length == 0 else { return }
 
-        highlighter.highlight(textStorage, in: lineRange)
+        let lineRange = text.length > 0 ? text.lineRange(for: safeRange) : NSRange(location: 0, length: 0)
+        highlighter.highlight(textStorage, in: lineRange, activeSelection: selectedRange())
 
-        // 强力触发排版确认，确保 TextKit 2 即时同步
-        if let layoutManager = self.layoutManager {
-            layoutManager.ensureLayout(forCharacterRange: lineRange)
-            layoutManager.invalidateDisplay(forCharacterRange: lineRange)
+        let updatedLineRange = NSIntersectionRange(
+            lineRange, NSRange(location: 0, length: textStorage.length)
+        )
+        if let layoutManager = self.layoutManager, updatedLineRange.length > 0 {
+            layoutManager.ensureLayout(forCharacterRange: updatedLineRange)
+            layoutManager.invalidateDisplay(forCharacterRange: updatedLineRange)
         }
 
-        // 关键：在布局确认后再更新输入属性，确保光标继承最新的样式
+        applyFocusMode()
         updateTypingAttributes()
-
         needsDisplay = true
     }
 
+    /// 光标移动后处理：
+    /// 1. 若光标刚离开某条含 `$...$` 的原始行，立刻刷新旧行以便将刚输完的 LaTeX 渲染为公式；
+    /// 2. 刷新零重排专注模式淡化区与当前行高亮带；
+    /// 3. 同步输入属性。
+    func handleSelectionDidChange() {
+        guard let textStorage = textStorage, !isHighlighting else { return }
+        let nsText = textStorage.string as NSString
+        let currentLoc = min(selectedRange().location, nsText.length)
+        let currentLine = nsText.length > 0
+            ? nsText.lineRange(for: NSRange(location: currentLoc, length: 0))
+            : NSRange(location: 0, length: 0)
+
+        // 当光标离开上一行且开启行内公式渲染时，若上一行含 `$` 则触发单行刷新完成渲染
+        if let prevLine = lastSelectionLineRange,
+           prevLine != currentLine,
+           currentConfiguration?.renderMathInline == true,
+           prevLine.location < nsText.length
+        {
+            let clampedPrev = NSIntersectionRange(prevLine, NSRange(location: 0, length: nsText.length))
+            if clampedPrev.length > 0 {
+                let prevText = nsText.substring(with: clampedPrev)
+                if prevText.contains("$") {
+                    highlightMarkdown(in: clampedPrev)
+                }
+            }
+        }
+        lastSelectionLineRange = currentLine
+
+        applyFocusMode()
+        updateTypingAttributes()
+        if currentConfiguration?.highlightCurrentLine == true {
+            needsDisplay = true
+        }
+    }
+
+    // MARK: - Zero-Reflow Focus Mode
+
+    func applyFocusMode() {
+        guard let config = currentConfiguration,
+              let storage = textStorage,
+              let layoutManager = layoutManager
+        else { return }
+
+        let fullRange = NSRange(location: 0, length: storage.length)
+        guard fullRange.length > 0 else { return }
+
+        // 先清除旧的临时前景色属性（绝不触发 NSTextStorage 修改或重排）
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: fullRange)
+
+        guard config.focusMode != .off else { return }
+
+        let nsText = storage.string as NSString
+        let sel = selectedRange()
+        let activeRange = focusRange(for: sel, in: nsText, mode: config.focusMode)
+        let dimmedColor = config.theme.foreground.nsColor.withAlphaComponent(0.28)
+
+        if activeRange.location > 0 {
+            let before = NSRange(location: 0, length: activeRange.location)
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: dimmedColor, forCharacterRange: before)
+        }
+        let afterStart = NSMaxRange(activeRange)
+        if afterStart < fullRange.length {
+            let after = NSRange(location: afterStart, length: fullRange.length - afterStart)
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: dimmedColor, forCharacterRange: after)
+        }
+    }
+
+    private func focusRange(
+        for selection: NSRange,
+        in text: NSString,
+        mode: EditorFocusMode
+    ) -> NSRange {
+        let clampedLoc = min(selection.location, max(0, text.length - 1))
+        let probeRange = NSRange(location: clampedLoc, length: min(selection.length, text.length - clampedLoc))
+
+        switch mode {
+        case .off:
+            return NSRange(location: 0, length: text.length)
+        case .paragraph:
+            return text.paragraphRange(for: probeRange)
+        case .sentence:
+            let paraRange = text.paragraphRange(for: probeRange)
+            var matchedSentence = paraRange
+            text.enumerateSubstrings(in: paraRange, options: [.bySentences, .substringNotRequired]) {
+                _, subRange, enclosingRange, stop in
+                if clampedLoc >= enclosingRange.location && clampedLoc <= NSMaxRange(enclosingRange) {
+                    matchedSentence = subRange.length > 0 ? enclosingRange : paraRange
+                    stop.pointee = true
+                }
+            }
+            return matchedSentence
+        }
+    }
+
+    // MARK: - Theme & Configuration
+
     func apply(theme: EditorTheme) {
-        // 防抖：主题完全相同则不触发重绘
         guard highlighter.theme != theme else { return }
 
         highlighter.theme = theme
@@ -533,70 +766,115 @@ class MarkdownTextView: NSTextView {
         highlightMarkdown()
     }
 
-    /// 应用编辑器配置
     func applyConfiguration(_ config: EditorConfiguration) {
-        let configChanged = currentConfiguration != config
+        let previous = currentConfiguration
+        let configChanged = previous != config
         currentConfiguration = config
 
-        // 同步字体和图片提供者
+        let needsRehighlight = previous == nil
+            || previous?.fontName != config.fontName
+            || previous?.fontSize != config.fontSize
+            || previous?.lineHeightMultiple != config.lineHeightMultiple
+            || previous?.paragraphSpacing != config.paragraphSpacing
+            || previous?.outdentSyntaxMarkers != config.outdentSyntaxMarkers
+            || previous?.renderMathInline != config.renderMathInline
+            || previous?.theme != config.theme
+
         highlighter.baseFont = config.nsFont
         highlighter.lineHeightMultiple = config.lineHeightMultiple
+        highlighter.paragraphSpacing = config.paragraphSpacing
+        highlighter.outdentSyntaxMarkers = config.outdentSyntaxMarkers
+        highlighter.renderMathInline = config.renderMathInline
         highlighter.imageProvider = config.imageProvider
 
-        // 更新边距
+        // 水平边距结合 contentWidth 居中约束
         textContainerInset = NSSize(
             width: config.horizontalPadding,
             height: config.verticalPadding
         )
 
-        // 更新打字机模式状态
+        // 打字机模式上下留白，确保首行与末行均可停靠到锚点
         if config.typewriterMode {
-            // 允许垂直滚动超过内容高度，以便最后一行也能居中
-            // 注意：这需要 textContainer 的高度只有在大量内容时才有效，
-            // 也可以通过 contentInsets 实现
-            let halfScreen = (enclosingScrollView?.bounds.height ?? 600) / 2
-            enclosingScrollView?.contentInsets.bottom = halfScreen
+            let viewportHeight = enclosingScrollView?.bounds.height ?? 600
+            let anchor = config.typewriterAnchor.fraction
+            enclosingScrollView?.contentInsets.top = max(config.verticalPadding, viewportHeight * anchor * 0.5)
+            enclosingScrollView?.contentInsets.bottom = viewportHeight * (1.0 - anchor) + 80
         } else {
+            enclosingScrollView?.contentInsets.top = config.verticalPadding
             enclosingScrollView?.contentInsets.bottom = config.verticalPadding
         }
 
-        // 仅当配置真正变化时才强制刷新高亮
-        if configChanged {
+        if needsRehighlight {
             highlightMarkdown()
-            updateTypingAttributes()  // 确保光标样式同步
+            updateTypingAttributes()
+            needsDisplay = true
+        } else if configChanged {
+            applyFocusMode()
+            if config.typewriterMode {
+                isUserScrollingManually = false
+                scrollToAnchorIfNeeded()
+            }
             needsDisplay = true
         }
     }
 
-    func scrollToCenter() {
-        guard let configuration = currentConfiguration, configuration.typewriterMode else { return }
+    // MARK: - Enhanced Typewriter Scrolling
+
+    func scrollToAnchorIfNeeded() {
+        guard let configuration = currentConfiguration,
+              configuration.typewriterMode,
+              !isUserScrollingManually
+        else { return }
         guard let layoutManager = layoutManager,
-            let textContainer = textContainer,
-            let scrollView = enclosingScrollView
+              let textContainer = textContainer,
+              let scrollView = enclosingScrollView
         else { return }
 
-        let selectedRange = selectedRange()
-        let glyphRange = layoutManager.glyphRange(
-            forCharacterRange: selectedRange, actualCharacterRange: nil)
+        let sel = selectedRange()
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
         let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        guard glyphRect.height > 0 else { return }
 
-        let documentVisRect = scrollView.documentVisibleRect
-        let height = documentVisRect.height
+        let visibleHeight = scrollView.documentVisibleRect.height
+        let anchorY = visibleHeight * configuration.typewriterAnchor.fraction
+        let targetY = glyphRect.midY + textContainerOrigin.y - anchorY
 
-        if glyphRect.height > 0 {
-            // 计算目标 Y 坐标，使光标位于视图中心
-            let targetY = glyphRect.midY - height / 2.0
-            // 确保不越界（虽然 contentInsets 允许越界，但 scrollToPoint 需要被 clipView 约束）
-            // 在 macOS 中，NSClipView 会自动处理 bounds 约束，但我们需要确保逻辑正确
-            let point = NSPoint(x: 0, y: targetY)  // 允许负值，ClipView 会处理
+        // 小于 2pt 偏差跳过，避免高频微抖动
+        if abs(scrollView.contentView.bounds.origin.y - targetY) < 2.0 {
+            return
+        }
 
-            // 只有当偏差较大时才滚动，避免抖动？不，打字机模式通常紧跟
-            scrollView.contentView.animator().setBoundsOrigin(point)
-            // 使用 animator 平滑滚动，或者直接 scrollToPoint
-            // scrollView.contentView.scrollToPoint(point)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    // MARK: - Helpers Exposed to Coordinator
+
+    func currentCursorContext() -> EditorCursorContext {
+        actor.analyzeCursorContext(
+            in: self,
+            fencedCodeRanges: highlighter.fencedCodeRanges,
+            mathBlockRanges: highlighter.mathBlockRanges
+        )
+    }
+
+    func caretBoundingFrameInWindow() -> CGRect? {
+        let sel = selectedRange()
+        return actor.boundingFrameInWindow(for: NSRange(location: sel.location, length: 0), in: self)
+    }
+
+    func moveCurrentParagraph(up: Bool) {
+        actor.moveParagraph(up: up, in: self)
+    }
+
+    func activateEntityAtCaret() {
+        let loc = selectedRange().location
+        if let entity = actor.detectEntity(at: loc, in: self) {
+            onEntityActivate?(entity)
         }
     }
+
+    // MARK: - Typing Attributes
 
     func updateTypingAttributes() {
         let range = selectedRange()
@@ -606,8 +884,6 @@ class MarkdownTextView: NSTextView {
             let prevCharRange = NSRange(location: range.location - 1, length: 1)
             let prevChar = (textStorage.string as NSString).substring(with: prevCharRange)
 
-            // 回车后光标在新行开头时，不应继承上一行的样式（如标题字体）
-            // 而是根据当前行的内容决定样式，空行则使用默认基础样式
             if prevChar == "\n" {
                 if range.location < textStorage.length {
                     let currentCharRange = NSRange(location: range.location, length: 1)
@@ -618,7 +894,8 @@ class MarkdownTextView: NSTextView {
                             attrs[.foregroundColor] = fallbackForeground
                         }
                         attrs.removeValue(forKey: .attachment)
-                        attrs.removeValue(forKey: NSAttributedString.Key("MarkdownSource"))
+                        attrs.removeValue(forKey: MarkdownTextActor.markdownSourceKey)
+                        attrs.removeValue(forKey: MarkdownTextActor.markdownEntityKindKey)
                         typingAttributes = attrs
                         return
                     }
@@ -637,7 +914,8 @@ class MarkdownTextView: NSTextView {
                 attrs[.foregroundColor] = fallbackForeground
             }
             attrs.removeValue(forKey: .attachment)
-            attrs.removeValue(forKey: NSAttributedString.Key("MarkdownSource"))
+            attrs.removeValue(forKey: MarkdownTextActor.markdownSourceKey)
+            attrs.removeValue(forKey: MarkdownTextActor.markdownEntityKindKey)
             typingAttributes = attrs
             return
         }
@@ -653,8 +931,6 @@ class MarkdownTextView: NSTextView {
 
 // MARK: - Indent Helpers
 
-/// 对 `textView` 当前选中行集合统一加/减一层缩进。
-/// 缩进单位：单个 Tab。反缩进时优先去掉一个前导 Tab；若行首为 2 或 4 个空格也接受。
 @MainActor
 fileprivate func applyIndent(to textView: NSTextView, outdent: Bool) {
     let ns = textView.string as NSString
@@ -662,7 +938,6 @@ fileprivate func applyIndent(to textView: NSTextView, outdent: Bool) {
     let lineRange = ns.lineRange(for: selected)
     let block = ns.substring(with: lineRange)
 
-    // 保留尾随换行，逐行处理
     var trailingNewline = ""
     var workingBlock = block
     if block.hasSuffix("\r\n") {
@@ -686,7 +961,6 @@ fileprivate func applyIndent(to textView: NSTextView, outdent: Bool) {
     }
     let newBlock = newLines.joined(separator: "\n") + trailingNewline
     textView.insertText(newBlock, replacementRange: lineRange)
-    // 重新选中处理过的行集合，便于继续 Tab/Shift-Tab
     let newLength = (newBlock as NSString).length
     textView.setSelectedRange(NSRange(location: lineRange.location, length: newLength))
 }

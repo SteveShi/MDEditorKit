@@ -134,6 +134,9 @@ public struct MarkdownConverter {
             let langClass = fenceInfo.map { " class=\"language-\($0.htmlAttributeEscaped())\"" } ?? ""
             return "<pre><code\(langClass)>\(content.htmlEscaped())</code></pre>\n"
         case let .paragraph(content):
+            if content.count == 1, case let .math(mathContent, _) = content[0] {
+                return "<div class=\"math-block\">$$\(mathContent.htmlEscaped())$$</div>\n"
+            }
             let body = content.map { visitInline($0, imageResolver: imageResolver) }.joined()
             return "<p>\(body)</p>\n"
         case let .heading(level, content):
@@ -212,7 +215,10 @@ public struct MarkdownConverter {
             let alt = plainText(from: children)
             return "<img src=\"\(resolved.htmlAttributeEscaped())\" alt=\"\(alt.htmlAttributeEscaped())\" />"
         case let .math(content, _):
-            return "<span class=\"math\">\(content.htmlEscaped())</span>"
+            if content.contains("\n") || content.contains("\\begin{") {
+                return "<div class=\"math-block\">$$\(content.htmlEscaped())$$</div>"
+            }
+            return "<span class=\"math\">\\(\(content.htmlEscaped())\\)</span>"
         @unknown default:
             return ""
         }

@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 2.3.0
+
+### Added
+- Native offline LaTeX math rendering (`MathRenderer`) powered by `SwiftMath` with LRU caching and baseline-aligned vector attachments for inline (`$...$`) and display (`$$...$$`) equations, plus caret-aware live source editing and graceful fallback on syntax errors.
+- Dedicated editing semantics engine (`MarkdownTextActor`): smart auto-pairing with overtype skip and empty-pair backspace deletion, backspace unwrapping of math attachments back to raw LaTeX, automatic list/quote continuation with ordered-list renumbering, two-stage smart Home (`⌘←`), and paragraph reordering (`⌥⌘↑` / `⌥⌘↓`).
+- Lightweight cursor context channel (`EditorCursorContext`, `EditorBlockContext`, `EditorEntityInfo`, `EditorWikiLinkQuery`) and `MDEditorProxy.onCursorContextChange` / `onEntityActivate` hooks, eliminating full-document Markdown reconstruction on arrow-key navigation.
+- Ulysses-style writing comfort options in `EditorConfiguration`: syntax marker outdenting (`outdentSyntaxMarkers`), zero-reflow sentence/paragraph focus mode (`focusMode`), configurable typewriter vertical anchor (`typewriterAnchor`: top/center/bottom) with scroll-wheel browse pause, subtle active-line highlight (`highlightCurrentLine`), and inline math toggle (`renderMathInline`).
+- `[[WikiLink]]` syntax highlighting and `MDEditorProxy` helpers for paragraph movement, inline/display math insertion, and entity activation.
+
+### Fixed
+- Preserved `$$...$$` and `\(...\)` delimiters for `.math` nodes in `MarkdownConverter.toHTML(_:imageResolver:)` so HTML/PDF KaTeX renderers typeset exported equations accurately.
+- Applied `EditorConfiguration.paragraphSpacing` in `MarkdownHighlighter.createBaseParagraphStyle()` and allowed live configuration/theme updates in `MDEditorView.updateNSView` while focused without overwriting active text input.
+
+---
+
+### 新增
+- 原生离线 LaTeX 数学公式渲染（`MathRenderer`）：复用 `SwiftMath` 实现带 LRU 缓存的矢量公式排版，支持行内（`$...$`）与块级（`$$...$$`）公式精确基线对齐、光标避让源码编辑以及语法错误优雅回退。
+- 独立编辑语义引擎（`MarkdownTextActor`）：支持智能成对补全/吞吐与空配对退格、公式附件退格还原源码、列表/引用自动续行与有序列表自动重编号、两段式智能行首跳转（`⌘←`）以及段落上下移动（`⌥⌘↑` / `⌥⌘↓`）。
+- 轻量级光标上下文通道（`EditorCursorContext`、`EditorBlockContext`、`EditorEntityInfo`、`EditorWikiLinkQuery`）及 `MDEditorProxy.onCursorContextChange` / `onEntityActivate` 回调，消除移动光标时触发全文 Markdown 重构的性能瓶颈。
+- `EditorConfiguration` 新增 Ulysses 风格写作选项：行首语法标记悬挂缩进（`outdentSyntaxMarkers`）、基于临时属性的零重排专注模式（`focusMode`：关闭/当前句/当前段）、可调打字机锚点（`typewriterAnchor`：顶/中/底，滚轮浏览自动暂停）、当前行柔和背景高亮（`highlightCurrentLine`）及行内公式渲染开关（`renderMathInline`）。
+- 新增 `[[WikiLink]]` 语法高亮，以及 `MDEditorProxy` 段落移动、公式插入与实体编辑触发方法。
+
+### 修复
+- 修复 `MarkdownConverter.toHTML(_:imageResolver:)` 输出 `.math` 节点时丢失 `$`/`$$` 定界符的问题，保证导出 HTML/PDF 时 KaTeX 正常渲染公式。
+- 修复 `MarkdownHighlighter` 段落间距未接入 `EditorConfiguration.paragraphSpacing` 的问题，并支持编辑器聚焦状态下实时应用配置与主题切换而不覆盖正文输入。
+
 ## 2.2.0
 
 ### Upgraded

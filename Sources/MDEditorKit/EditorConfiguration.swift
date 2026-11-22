@@ -8,6 +8,28 @@
 import AppKit
 import SwiftUI
 
+/// 专注模式：高亮当前编辑范围，以零重排方式淡化其余内容。
+public enum EditorFocusMode: String, Sendable, Equatable, Hashable, CaseIterable {
+    case off
+    case sentence
+    case paragraph
+}
+
+/// 打字机模式垂直锚点位置。
+public enum TypewriterAnchor: String, Sendable, Equatable, Hashable, CaseIterable {
+    case top
+    case center
+    case bottom
+
+    /// 锚点占可视区高度的比例。
+    public var fraction: CGFloat {
+        switch self {
+        case .top: return 0.30
+        case .center: return 0.50
+        case .bottom: return 0.70
+        }
+    }
+}
 
 /// 编辑器配置
 public struct EditorConfiguration: Sendable, Equatable, Hashable {
@@ -21,6 +43,16 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
     public var paragraphSpacing: CGFloat
     /// 打字机模式
     public var typewriterMode: Bool
+    /// 打字机模式垂直锚点（顶 / 中 / 底）
+    public var typewriterAnchor: TypewriterAnchor
+    /// 专注模式（关闭 / 当前句 / 当前段）
+    public var focusMode: EditorFocusMode
+    /// 是否将行首语法标记（# / > / -）悬挂缩进到正文左侧
+    public var outdentSyntaxMarkers: Bool
+    /// 是否为当前编辑行绘制柔和背景高亮带
+    public var highlightCurrentLine: Bool
+    /// 是否在编辑器中实时渲染 LaTeX 数学公式（$...$ / $$...$$）
+    public var renderMathInline: Bool
 
     /// 编辑器主题（字符着色、代码块底色、光标色等）
     public var theme: EditorTheme
@@ -69,6 +101,11 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
         contentWidth: CGFloat = 750.0,
         paragraphSpacing: CGFloat = 18.0,
         typewriterMode: Bool = false,
+        typewriterAnchor: TypewriterAnchor = .center,
+        focusMode: EditorFocusMode = .off,
+        outdentSyntaxMarkers: Bool = true,
+        highlightCurrentLine: Bool = false,
+        renderMathInline: Bool = true,
         theme: EditorTheme = .default,
         imageProvider: (@Sendable (String) -> NSImage?)? = nil,
         imageSaver: (@Sendable (NSImage) -> String?)? = nil
@@ -78,6 +115,11 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
         self.contentWidth = contentWidth
         self.paragraphSpacing = paragraphSpacing
         self.typewriterMode = typewriterMode
+        self.typewriterAnchor = typewriterAnchor
+        self.focusMode = focusMode
+        self.outdentSyntaxMarkers = outdentSyntaxMarkers
+        self.highlightCurrentLine = highlightCurrentLine
+        self.renderMathInline = renderMathInline
         self.theme = theme
         self.imageProvider = imageProvider
         self.imageSaver = imageSaver
@@ -86,12 +128,20 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
     // MARK: - Equatable & Hashable
 
     public static func == (lhs: EditorConfiguration, rhs: EditorConfiguration) -> Bool {
-        lhs.fontName == rhs.fontName && lhs.lineHeightMultiple == rhs.lineHeightMultiple
-            && lhs.contentWidth == rhs.contentWidth && lhs.paragraphSpacing == rhs.paragraphSpacing
+        lhs.fontName == rhs.fontName
+            && lhs.lineHeightMultiple == rhs.lineHeightMultiple
+            && lhs.contentWidth == rhs.contentWidth
+            && lhs.paragraphSpacing == rhs.paragraphSpacing
             && lhs.typewriterMode == rhs.typewriterMode
+            && lhs.typewriterAnchor == rhs.typewriterAnchor
+            && lhs.focusMode == rhs.focusMode
+            && lhs.outdentSyntaxMarkers == rhs.outdentSyntaxMarkers
+            && lhs.highlightCurrentLine == rhs.highlightCurrentLine
+            && lhs.renderMathInline == rhs.renderMathInline
             && lhs.theme == rhs.theme
             && lhs.horizontalPadding == rhs.horizontalPadding
-            && lhs.verticalPadding == rhs.verticalPadding && lhs.fontSize == rhs.fontSize
+            && lhs.verticalPadding == rhs.verticalPadding
+            && lhs.fontSize == rhs.fontSize
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -100,6 +150,11 @@ public struct EditorConfiguration: Sendable, Equatable, Hashable {
         hasher.combine(contentWidth)
         hasher.combine(paragraphSpacing)
         hasher.combine(typewriterMode)
+        hasher.combine(typewriterAnchor)
+        hasher.combine(focusMode)
+        hasher.combine(outdentSyntaxMarkers)
+        hasher.combine(highlightCurrentLine)
+        hasher.combine(renderMathInline)
         hasher.combine(theme)
         hasher.combine(horizontalPadding)
         hasher.combine(verticalPadding)

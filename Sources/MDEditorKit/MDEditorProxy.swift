@@ -89,6 +89,13 @@ public class MDEditorProxy: ObservableObject {
     internal var indentSelectionAction: (() -> Void)?
     internal var outdentSelectionAction: (() -> Void)?
 
+    // —— 新增（2.3.0）：段落移动、LaTeX 公式、实体编辑
+    internal var moveParagraphUpAction: (() -> Void)?
+    internal var moveParagraphDownAction: (() -> Void)?
+    internal var insertInlineMathAction: ((String) -> Void)?
+    internal var insertDisplayMathAction: ((String) -> Void)?
+    internal var activateEntityAtCaretAction: (() -> Void)?
+
     // MARK: - Selection / Text Observation
 
     /// 编辑器选区或光标位置发生变化时回调。
@@ -97,7 +104,17 @@ public class MDEditorProxy: ObservableObject {
     ///
     /// - Parameter range: 当前选区；`length == 0` 表示纯光标。
     /// - Parameter text: 当前编辑器完整文本（已还原 Markdown 源）。
+    /// - Note: 若仅需要快捷栏上下文或双向链接补全，请优先订阅 `onCursorContextChange`，
+    ///         避免每次光标移动触发全文 Markdown 还原。
     public var onSelectionChange: ((NSRange, String) -> Void)?
+
+    /// 轻量级光标上下文变化回调（零全文重构）。
+    /// 调用线程：主线程。用于驱动上下文敏感的快捷符号栏、实体提示和 `[[` 双向链接补全。
+    public var onCursorContextChange: ((EditorCursorContext) -> Void)?
+
+    /// 当用户点击数学公式/图片附件、Command+点击链接或调用 `activateEntityAtCaret()` 时回调，
+    /// 供宿主弹出内联实体编辑气泡。
+    public var onEntityActivate: ((EditorEntityInfo) -> Void)?
 
     /// 编辑器文本发生变化时回调。
     /// 调用线程：主线程。SwiftUI `@Binding text` 写回同源；
@@ -224,6 +241,29 @@ public class MDEditorProxy: ObservableObject {
     public func indentSelection() { indentSelectionAction?() }
     /// 对当前选中行集合整体减一层缩进（仅去掉一个前导 `\t` 或两个空格）。
     public func outdentSelection() { outdentSelectionAction?() }
+
+    // MARK: - Paragraph Reordering & Math / Entity Editing
+
+    /// 将当前段落/选中行向上移动一行（对应 `⌥⌘↑`）。
+    public func moveParagraphUp() { moveParagraphUpAction?() }
+
+    /// 将当前段落/选中行向下移动一行（对应 `⌥⌘↓`）。
+    public func moveParagraphDown() { moveParagraphDownAction?() }
+
+    /// 在光标处插入行内 LaTeX 公式 `$...$`（若有选区则包裹选区）。
+    public func insertInlineMath(_ expression: String = "") {
+        insertInlineMathAction?(expression)
+    }
+
+    /// 在光标处插入块级 LaTeX 公式 `$$\n...\n$$`（若有选区则包裹选区）。
+    public func insertDisplayMath(_ expression: String = "") {
+        insertDisplayMathAction?(expression)
+    }
+
+    /// 激活当前光标处的 Markdown 实体（链接 / 图片 / 数学公式），触发 `onEntityActivate`。
+    public func activateEntityAtCaret() {
+        activateEntityAtCaretAction?()
+    }
 
     // MARK: - Find & Replace
 

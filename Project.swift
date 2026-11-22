@@ -3,7 +3,8 @@ import ProjectDescription
 let project = Project(
     name: "MDEditorKit",
     packages: [
-        .package(url: "https://github.com/Lakr233/MarkdownView.git", from: "4.3.1")
+        .package(url: "https://github.com/Lakr233/MarkdownView.git", from: "4.3.1"),
+        .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3")
     ],
     targets: [
         .target(
@@ -15,7 +16,8 @@ let project = Project(
             sources: ["Sources/MDEditorKit/**"],
             dependencies: [
                 .package(product: "MarkdownView"),
-                .package(product: "MarkdownParser")
+                .package(product: "MarkdownParser"),
+                .package(product: "SwiftMath")
             ],
             settings: .settings(
                 base: [

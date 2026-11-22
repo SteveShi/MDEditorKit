@@ -9,6 +9,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Lakr233/MarkdownView.git", from: "4.3.1"),
+        .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3"),
     ],
     targets: [
         .target(
@@ -16,6 +17,7 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownView", package: "MarkdownView"),
                 .product(name: "MarkdownParser", package: "MarkdownView"),
+                .product(name: "SwiftMath", package: "SwiftMath"),
             ]
         )
     ]

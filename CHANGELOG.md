@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2.4.0
+
+### Added & Improved
+- **5-State Geometric Cursor Context (`EditorBlockContext`)**: Upgraded `MarkdownTextActor.classifyBlockContext` to match paragraph geometry (`getParagraphStart:end:contentsEnd:forRange:` + `contentStart` past leading syntax markers), cleanly distinguishing empty lines (`.empty`), prose body/tail (`.paragraphText`), inline selections (`.inlineText`), paragraph start / block prefix positions (`.paragraphStart`, `.headingLine`, `.listLine(kind: EditorListKind)`, `.quoteLine`), single full-line selections (`.fullLine`), and multi-paragraph selections (`.fullLines`).
+- **Smart Heading Level Suggestion**: Walks upward across preceding paragraphs to suggest the next heading level (clamped to H1–H3) based on the nearest enclosing heading.
+- **Immediate Context Refresh & Bottom Inset**: Triggers `notifySelectionChange` from `textDidChange` so quick action bars respond immediately while typing or deleting, and reserves safe bottom scroll padding (`>= 56pt`) in non-typewriter mode for docked bottom toolbars.
+- **CI & Module Hygiene**: Upgraded GitHub Actions release steps to Node.js 24 (`upload-artifact@v7`, `action-gh-release@v3`) and narrowed internal `MarkdownParser` / `SwiftMath` imports to `internal import`.
+
+---
+
+### 新增与优化
+- **5 态几何光标作用域（`EditorBlockContext`）**：升级 `MarkdownTextActor.classifyBlockContext`，基于段落起止边界与跳过行首语法前缀后的正文起点 `contentStart`，精准区分空行（`.empty`）、正文句中/段尾（`.paragraphText`）、局部选区（`.inlineText`）、段落行首与前缀位（`.paragraphStart` / `.headingLine` / `.listLine(kind: EditorListKind)` / `.quoteLine`）、单整行选区（`.fullLine`）与跨多段选区（`.fullLines`）。
+- **智能标题层级推荐**：向上跨段落回溯最近标题行，自动推荐下一级标题（钳制在 H1–H3）。
+- **实时上下文刷新与底部安全留白**：在 `textDidChange` 中同步派发轻量上下文变化，并在非打字机模式下为底部停靠快捷栏预留至少 `56pt` 滚动安全边距。
+- **CI 与模块导入优化**：将发版 Actions 升级至原生 Node.js 24，并将内部使用的 `MarkdownParser` / `SwiftMath` 改为 `internal import`。
+
 ## 2.3.1
 
 ### Fixed
@@ -16,7 +32,7 @@
 - Native offline LaTeX math rendering (`MathRenderer`) powered by `SwiftMath` with LRU caching and baseline-aligned vector attachments for inline (`$...$`) and display (`$$...$$`) equations, plus caret-aware live source editing and graceful fallback on syntax errors.
 - Dedicated editing semantics engine (`MarkdownTextActor`): smart auto-pairing with overtype skip and empty-pair backspace deletion, backspace unwrapping of math attachments back to raw LaTeX, automatic list/quote continuation with ordered-list renumbering, two-stage smart Home (`⌘←`), and paragraph reordering (`⌥⌘↑` / `⌥⌘↓`).
 - Lightweight cursor context channel (`EditorCursorContext`, `EditorBlockContext`, `EditorEntityInfo`, `EditorWikiLinkQuery`) and `MDEditorProxy.onCursorContextChange` / `onEntityActivate` hooks, eliminating full-document Markdown reconstruction on arrow-key navigation.
-- Ulysses-style writing comfort options in `EditorConfiguration`: syntax marker outdenting (`outdentSyntaxMarkers`), zero-reflow sentence/paragraph focus mode (`focusMode`), configurable typewriter vertical anchor (`typewriterAnchor`: top/center/bottom) with scroll-wheel browse pause, subtle active-line highlight (`highlightCurrentLine`), and inline math toggle (`renderMathInline`).
+- Distraction-free writing comfort options in `EditorConfiguration`: syntax marker outdenting (`outdentSyntaxMarkers`), zero-reflow sentence/paragraph focus mode (`focusMode`), configurable typewriter vertical anchor (`typewriterAnchor`: top/center/bottom) with scroll-wheel browse pause, subtle active-line highlight (`highlightCurrentLine`), and inline math toggle (`renderMathInline`).
 - `[[WikiLink]]` syntax highlighting and `MDEditorProxy` helpers for paragraph movement, inline/display math insertion, and entity activation.
 
 ### Fixed
@@ -29,7 +45,7 @@
 - 原生离线 LaTeX 数学公式渲染（`MathRenderer`）：复用 `SwiftMath` 实现带 LRU 缓存的矢量公式排版，支持行内（`$...$`）与块级（`$$...$$`）公式精确基线对齐、光标避让源码编辑以及语法错误优雅回退。
 - 独立编辑语义引擎（`MarkdownTextActor`）：支持智能成对补全/吞吐与空配对退格、公式附件退格还原源码、列表/引用自动续行与有序列表自动重编号、两段式智能行首跳转（`⌘←`）以及段落上下移动（`⌥⌘↑` / `⌥⌘↓`）。
 - 轻量级光标上下文通道（`EditorCursorContext`、`EditorBlockContext`、`EditorEntityInfo`、`EditorWikiLinkQuery`）及 `MDEditorProxy.onCursorContextChange` / `onEntityActivate` 回调，消除移动光标时触发全文 Markdown 重构的性能瓶颈。
-- `EditorConfiguration` 新增 Ulysses 风格写作选项：行首语法标记悬挂缩进（`outdentSyntaxMarkers`）、基于临时属性的零重排专注模式（`focusMode`：关闭/当前句/当前段）、可调打字机锚点（`typewriterAnchor`：顶/中/底，滚轮浏览自动暂停）、当前行柔和背景高亮（`highlightCurrentLine`）及行内公式渲染开关（`renderMathInline`）。
+- `EditorConfiguration` 新增沉浸式写作选项：行首语法标记悬挂缩进（`outdentSyntaxMarkers`）、基于临时属性的零重排专注模式（`focusMode`：关闭/当前句/当前段）、可调打字机锚点（`typewriterAnchor`：顶/中/底，滚轮浏览自动暂停）、当前行柔和背景高亮（`highlightCurrentLine`）及行内公式渲染开关（`renderMathInline`）。
 - 新增 `[[WikiLink]]` 语法高亮，以及 `MDEditorProxy` 段落移动、公式插入与实体编辑触发方法。
 
 ### 修复

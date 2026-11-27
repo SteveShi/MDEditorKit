@@ -1,6 +1,6 @@
 # MDEditorKit
 
-MDEditorKit is a native macOS Markdown editor component built on TextKit 2. It delivers a Ulysses-style "what you see is what you mean" editing surface — Markdown source stays in place, while syntax markers, headings, lists, code, images, and quotes are styled inline as you type. The package powers [MDWriter](https://github.com/SteveShi/MDWriter) and is reusable in any SwiftUI or AppKit host.
+MDEditorKit is a native macOS Markdown editor component built on TextKit 2. It delivers a clean "what you see is what you mean" editing surface — Markdown source stays in place, while syntax markers, headings, lists, code, images, and quotes are styled inline as you type. The package powers [MDWriter](https://github.com/SteveShi/MDWriter) and is reusable in any SwiftUI or AppKit host.
 
 > Renamed from **MDEditor** in 2.0.0. The Swift module is now `MDEditorKit`; public type names (`MDEditorView`, `MDEditorProxy`, `EditorConfiguration`, …) are unchanged.
 
@@ -119,7 +119,7 @@ All editor interactions go through **`MDEditorProxy`** (`ObservableObject`). Att
 | --- | --- |
 | `getCurrentLineRange() -> NSRange` | `NSRange` of the line containing the caret (includes the trailing newline if present). |
 | `getCurrentLineText() -> String` | Text of the line containing the caret (includes the trailing newline if present). |
-| `replaceCurrentLine(with replacement: String)` | Atomic replacement of the current line — typical use is Ulysses-style block-prefix swapping (`# ` → `## `, list to quote, …). |
+| `replaceCurrentLine(with replacement: String)` | Atomic replacement of the current line — typical use is instant block-prefix swapping (`# ` → `## `, list to quote, …). |
 
 ### Undo / Redo
 

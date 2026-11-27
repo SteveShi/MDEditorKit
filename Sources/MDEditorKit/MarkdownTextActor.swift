@@ -506,18 +506,7 @@ final class MarkdownTextActor {
         fencedCodeRanges: [NSRange],
         mathBlockRanges: [NSRange]
     ) -> EditorBlockContext {
-        if range.length > 0 {
-            let selected = text.substring(with: range)
-            if selected.contains("\n") {
-                return .fullLines
-            }
-            let lineRange = text.lineRange(for: range)
-            let isFullLine = range.location == lineRange.location
-                && (NSMaxRange(range) >= NSMaxRange(lineRange) - 1 || NSMaxRange(range) == NSMaxRange(lineRange))
-            return isFullLine ? .fullLines : .inlineText
-        }
-
-        // O(K) 命中缓存的代码块与块级公式区间（K 通常很小）
+        // 1. O(K) 命中缓存的围栏代码块与块级公式区间（K 通常很小）
         for codeRange in fencedCodeRanges {
             if range.location >= codeRange.location && range.location <= NSMaxRange(codeRange) {
                 return .codeBlock
@@ -529,14 +518,57 @@ final class MarkdownTextActor {
             }
         }
 
-        let lineRange = text.lineRange(for: NSRange(location: range.location, length: 0))
-        let line = text.substring(with: lineRange)
-        let lineNoNL = stripTrailingNewline(line)
+        // 2. 精确计算当前段落几何边界（1:1 对齐 Ulysses `_actionScope` 的 getParagraphStart:end:contentsEnd:forRange:）
+        var paraStart = 0
+        var paraEnd = 0
+        var contentsEnd = 0
+        let safeLoc = min(range.location, text.length)
+        text.getParagraphStart(
+            &paraStart,
+            end: &paraEnd,
+            contentsEnd: &contentsEnd,
+            for: NSRange(location: safeLoc, length: 0)
+        )
+        let paraRange = NSRange(location: paraStart, length: max(0, contentsEnd - paraStart))
+        let lineNoNL = paraRange.length > 0 ? text.substring(with: paraRange) : ""
         let trimmed = lineNoNL.trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
 
         if trimmed.hasPrefix("$$") {
             return .mathBlock
         }
+
+        // 3. 有选区：按 Ulysses Scope 4（跨多段）/ Scope 3（单整段）/ Scope 1（行内局部选区）判定
+        if range.length > 0 {
+            let selEnd = NSMaxRange(range)
+            if selEnd > paraEnd {
+                return .fullLines
+            }
+            if selEnd == paraEnd || (range.location <= paraStart && selEnd >= contentsEnd) {
+                return .fullLine(
+                    suggestedHeadingLevel: suggestedHeadingLevel(before: paraStart, in: text)
+                )
+            }
+            return .inlineText
+        }
+
+        // 4. Scope 0：无选区且为空行（paraStart == contentsEnd 或仅含空白）
+        if trimmed.isEmpty {
+            return .empty(
+                suggestedHeadingLevel: suggestedHeadingLevel(before: paraStart, in: text)
+            )
+        }
+
+        // 5. 非空段落：计算正文内容起点 contentStart（跳过行首空白与 # / - / 1. / > 标记）
+        let prefixLen = blockPrefixUTF16Length(of: lineNoNL)
+        let leadingWSLen = (String(lineNoNL.prefix(while: { $0 == " " || $0 == "\t" })) as NSString).length
+        let contentStart = paraStart + max(prefixLen, leadingWSLen)
+
+        // 光标越过行首前缀进入正文句中或段尾 → Scope 1（行内模式，与 Ulysses 100% 一致）
+        if range.location > contentStart {
+            return .paragraphText
+        }
+
+        // 光标位于行首或行首前缀处 → Scope 2（块级转换 / 切换模式）
         if let level = Self.headingLevel(of: trimmed) {
             return .headingLine(level: level)
         }
@@ -555,17 +587,9 @@ final class MarkdownTextActor {
             return .listLine(kind: .ordered)
         }
 
-        if trimmed.isEmpty {
-            return .empty(suggestedHeadingLevel: suggestedHeadingLevel(before: lineRange, in: text))
-        }
-
-        // 非空普通段落：区分「行首（适合转标题/列表/引用）」与「段中/段尾（适合行内样式与插入）」
-        let leadingWS = String(lineNoNL.prefix(while: { $0 == " " || $0 == "\t" }))
-        let cursorInLine = range.location - lineRange.location
-        if cursorInLine <= (leadingWS as NSString).length {
-            return .paragraphStart(suggestedHeadingLevel: suggestedHeadingLevel(before: lineRange, in: text))
-        }
-        return .paragraphText
+        return .paragraphStart(
+            suggestedHeadingLevel: suggestedHeadingLevel(before: paraStart, in: text)
+        )
     }
 
     private func detectWikiLinkQuery(
@@ -598,26 +622,23 @@ final class MarkdownTextActor {
         )
     }
 
-    private func suggestedHeadingLevel(before lineRange: NSRange, in text: NSString) -> Int {
-        var cursor = lineRange.location
+    /// 向上回溯最近的标题行，智能推荐下一级标题（钳制在 1...3，对齐 Ulysses `tagForOffsettingHeadingLevelAtSelectionBy: 1`）。
+    private func suggestedHeadingLevel(before location: Int, in text: NSString) -> Int {
+        var cursor = location
         var steps = 0
-        while cursor > 0 && steps < 30 {
+        while cursor > 0 && steps < 80 {
             steps += 1
             let prevRange = text.lineRange(for: NSRange(location: cursor - 1, length: 0))
             let prev = text.substring(with: prevRange)
                 .trimmingCharacters(in: CharacterSet(charactersIn: " \t\n\r"))
-            if prev.isEmpty {
-                cursor = prevRange.location
-                continue
-            }
             if let level = Self.headingLevel(of: prev) {
                 switch level {
                 case 1: return 2
                 case 2: return 3
-                default: return 1
+                default: return 3
                 }
             }
-            return 1
+            cursor = prevRange.location
         }
         return 1
     }

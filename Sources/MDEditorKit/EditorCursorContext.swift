@@ -16,28 +16,30 @@ public enum EditorListKind: String, Sendable, Equatable, Hashable {
     case task
 }
 
-/// 光标或选区所在的块/行内语法上下文。
+/// 光标或选区所在的块/行内几何作用域（1:1 对齐 Ulysses 42.2 `_actionScope` 5 态模型 + 代码/公式块）。
 public enum EditorBlockContext: Sendable, Equatable, Hashable {
-    /// 无选区，光标位于空白行。关联值为基于前文标题推荐的下一级标题（1...3）。
+    /// Scope 0：无选区，空白行（paraStart == contentsEnd）。关联值为基于上文标题智能推荐的标题级别（1...3）。
     case empty(suggestedHeadingLevel: Int)
-    /// 无选区，光标位于非空普通段落的行首（适合块级格式转换）。
-    case paragraphStart(suggestedHeadingLevel: Int)
-    /// 无选区，光标位于非空普通段落的文字内部或段尾（适合行内格式与链接/公式插入）。
+    /// Scope 1（无选区）：光标位于非空段落正文内部或段尾（越过行首语法前缀），适合行内格式与插入。
     case paragraphText
-    /// 无选区，光标位于标题行（1...6）。
-    case headingLine(level: Int)
-    /// 无选区，光标位于列表行（无序 / 有序 / 任务列表）。
-    case listLine(kind: EditorListKind)
-    /// 无选区，光标位于引用行（>）。
-    case quoteLine
-    /// 无选区，光标位于围栏代码块内（``` ... ```）。
-    case codeBlock
-    /// 无选区，光标位于 LaTeX 块级公式（$$ ... $$）内。
-    case mathBlock
-    /// 选中行内文本。
+    /// Scope 1（有选区）：行内局部选区，适合行内包裹格式。
     case inlineText
-    /// 选中整行或跨行。
+    /// Scope 2：无选区，光标位于非空普通段落行首（第 0 列或前导空白处）。
+    case paragraphStart(suggestedHeadingLevel: Int)
+    /// Scope 3：选中单整行 / 单整段（selEnd == paraEnd）。
+    case fullLine(suggestedHeadingLevel: Int)
+    /// Scope 4：跨多段选区（selEnd > paraEnd）。
     case fullLines
+    /// Scope 2 细化：光标位于标题行行首前缀处（1...6）。
+    case headingLine(level: Int)
+    /// Scope 2 细化：光标位于列表行行首前缀处（无序 / 有序 / 任务列表）。
+    case listLine(kind: EditorListKind)
+    /// Scope 2 细化：光标位于引用行行首前缀处（>）。
+    case quoteLine
+    /// 特殊块：光标位于围栏代码块内（``` ... ```）。
+    case codeBlock
+    /// 特殊块：光标位于 LaTeX 块级公式（$$ ... $$）内。
+    case mathBlock
 }
 
 /// 可在气泡中交互编辑的 Markdown 实体类别。

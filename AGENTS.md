@@ -4,7 +4,7 @@ This file provides operational guidance to AI coding agents (Antigravity, Cursor
 
 ## Project Overview
 
-MDEditorKit is a native macOS Markdown editor component built on TextKit 2, delivering Ulysses-style "what you see is what you mean" editing. The package provides a SwiftUI-compatible editor where Markdown source stays in place while syntax markers, headings, lists, code, images, and quotes are styled inline as you type.
+MDEditorKit is a native macOS Markdown editor component built on TextKit 2, delivering clean "what you see is what you mean" editing. The package provides a SwiftUI-compatible editor where Markdown source stays in place while syntax markers, headings, lists, code, images, and quotes are styled inline as you type.
 
 **Key characteristics:**
 - TextKit 2 engine (not a WebView wrapper)
@@ -75,7 +75,7 @@ open MDEditorKit.xcodeproj
 - Handles the "MarkdownSource" custom attribute that preserves original Markdown for attachments
 
 **MarkdownHighlighter** (`MarkdownHighlighter.swift`, ~599 lines)
-- Applies Ulysses-style inline syntax highlighting using regex patterns
+- Applies in-place inline syntax highlighting using regex patterns
 - **Two-phase rendering**:
   1. Non-destructive styling (colors, fonts, attributes)
   2. Destructive replacements (images converted to `NSTextAttachment`)

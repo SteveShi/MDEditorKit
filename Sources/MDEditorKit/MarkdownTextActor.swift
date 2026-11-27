@@ -531,7 +531,8 @@ final class MarkdownTextActor {
 
         let lineRange = text.lineRange(for: NSRange(location: range.location, length: 0))
         let line = text.substring(with: lineRange)
-        let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: " \t\n\r"))
+        let lineNoNL = stripTrailingNewline(line)
+        let trimmed = lineNoNL.trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
 
         if trimmed.hasPrefix("$$") {
             return .mathBlock
@@ -543,13 +544,28 @@ final class MarkdownTextActor {
             return .quoteLine
         }
         if trimmed.hasPrefix("- [ ]") || trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [X]")
-            || trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ")
-            || Self.isOrderedListPrefix(trimmed)
+            || trimmed.hasPrefix("* [ ]") || trimmed.hasPrefix("* [x]") || trimmed.hasPrefix("* [X]")
         {
-            return .listLine
+            return .listLine(kind: .task)
+        }
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
+            return .listLine(kind: .unordered)
+        }
+        if Self.isOrderedListPrefix(trimmed) {
+            return .listLine(kind: .ordered)
         }
 
-        return .empty(suggestedHeadingLevel: suggestedHeadingLevel(before: lineRange, in: text))
+        if trimmed.isEmpty {
+            return .empty(suggestedHeadingLevel: suggestedHeadingLevel(before: lineRange, in: text))
+        }
+
+        // 非空普通段落：区分「行首（适合转标题/列表/引用）」与「段中/段尾（适合行内样式与插入）」
+        let leadingWS = String(lineNoNL.prefix(while: { $0 == " " || $0 == "\t" }))
+        let cursorInLine = range.location - lineRange.location
+        if cursorInLine <= (leadingWS as NSString).length {
+            return .paragraphStart(suggestedHeadingLevel: suggestedHeadingLevel(before: lineRange, in: text))
+        }
+        return .paragraphText
     }
 
     private func detectWikiLinkQuery(

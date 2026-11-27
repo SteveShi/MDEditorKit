@@ -48,6 +48,8 @@ public struct MDEditorView: NSViewRepresentable {
                 parent.text = reconstructed
             }
             parent.proxy.onTextChange?(reconstructed)
+            // 文本变更后同步刷新轻量上下文（例如在空行输入首个字符、输入 `# ` / `- ` 或删空当前行时）
+            notifySelectionChange(in: textView)
         }
 
         /// 从富文本中还原 Markdown 源码，处理被替换为图片或 LaTeX 数学公式的附件。
@@ -801,7 +803,7 @@ class MarkdownTextView: NSTextView {
             enclosingScrollView?.contentInsets.bottom = viewportHeight * (1.0 - anchor) + 80
         } else {
             enclosingScrollView?.contentInsets.top = config.verticalPadding
-            enclosingScrollView?.contentInsets.bottom = config.verticalPadding
+            enclosingScrollView?.contentInsets.bottom = max(config.verticalPadding, 56)
         }
 
         if needsRehighlight {

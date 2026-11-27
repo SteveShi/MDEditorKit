@@ -9,14 +9,25 @@
 import CoreGraphics
 import Foundation
 
+/// 列表行的具体类型，供快捷栏高亮当前激活态并切换列表形式。
+public enum EditorListKind: String, Sendable, Equatable, Hashable {
+    case unordered
+    case ordered
+    case task
+}
+
 /// 光标或选区所在的块/行内语法上下文。
 public enum EditorBlockContext: Sendable, Equatable, Hashable {
-    /// 无选区，空行或普通段落。关联值为基于前文标题推荐的下一级标题（1...3）。
+    /// 无选区，光标位于空白行。关联值为基于前文标题推荐的下一级标题（1...3）。
     case empty(suggestedHeadingLevel: Int)
+    /// 无选区，光标位于非空普通段落的行首（适合块级格式转换）。
+    case paragraphStart(suggestedHeadingLevel: Int)
+    /// 无选区，光标位于非空普通段落的文字内部或段尾（适合行内格式与链接/公式插入）。
+    case paragraphText
     /// 无选区，光标位于标题行（1...6）。
     case headingLine(level: Int)
-    /// 无选区，光标位于列表行（- / * / + / 1. / - [ ]）。
-    case listLine
+    /// 无选区，光标位于列表行（无序 / 有序 / 任务列表）。
+    case listLine(kind: EditorListKind)
     /// 无选区，光标位于引用行（>）。
     case quoteLine
     /// 无选区，光标位于围栏代码块内（``` ... ```）。

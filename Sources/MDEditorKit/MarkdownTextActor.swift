@@ -2,7 +2,7 @@
 //  MarkdownTextActor.swift
 //  MDEditorKit
 //
-//  独立的 Markdown 编辑语义与上下文分析引擎（参考 Ulysses ULTextActor 架构）。
+//  独立的 Markdown 编辑语义与上下文分析引擎。
 //  收拢智能成对补全/吞吐、列表续行与自动重编号、两段式行首跳转、段落上下移动，
 //  以及零全文重构的光标上下文 / 实体 / WikiLink 查询分析。
 //
@@ -266,7 +266,7 @@ final class MarkdownTextActor {
 
     // MARK: - Smart Two-Stage Home (⌘←)
 
-    /// 两段式行首跳转（参考 Ulysses `performMoveToBeginningOfLineWithProposedLocation:`）：
+    /// 两段式行首跳转：
     /// 第一次跳到行首 Markdown 标记之后的正文起点；若已在正文起点或之前，则跳到第 0 列。
     func handleMoveToBeginningOfLine(extendingSelection: Bool, in textView: NSTextView) -> Bool {
         let nsText = textView.string as NSString
@@ -518,7 +518,7 @@ final class MarkdownTextActor {
             }
         }
 
-        // 2. 精确计算当前段落几何边界（1:1 对齐 Ulysses `_actionScope` 的 getParagraphStart:end:contentsEnd:forRange:）
+        // 2. 精确计算当前段落几何边界（getParagraphStart:end:contentsEnd:forRange:）
         var paraStart = 0
         var paraEnd = 0
         var contentsEnd = 0
@@ -537,7 +537,7 @@ final class MarkdownTextActor {
             return .mathBlock
         }
 
-        // 3. 有选区：按 Ulysses Scope 4（跨多段）/ Scope 3（单整段）/ Scope 1（行内局部选区）判定
+        // 3. 有选区：按 Scope 4（跨多段）/ Scope 3（单整段）/ Scope 1（行内局部选区）判定
         if range.length > 0 {
             let selEnd = NSMaxRange(range)
             if selEnd > paraEnd {
@@ -563,7 +563,7 @@ final class MarkdownTextActor {
         let leadingWSLen = (String(lineNoNL.prefix(while: { $0 == " " || $0 == "\t" })) as NSString).length
         let contentStart = paraStart + max(prefixLen, leadingWSLen)
 
-        // 光标越过行首前缀进入正文句中或段尾 → Scope 1（行内模式，与 Ulysses 100% 一致）
+        // 光标越过行首前缀进入正文句中或段尾 → Scope 1（行内模式）
         if range.location > contentStart {
             return .paragraphText
         }
@@ -622,7 +622,7 @@ final class MarkdownTextActor {
         )
     }
 
-    /// 向上回溯最近的标题行，智能推荐下一级标题（钳制在 1...3，对齐 Ulysses `tagForOffsettingHeadingLevelAtSelectionBy: 1`）。
+    /// 向上回溯最近的标题行，智能推荐下一级标题（钳制在 1...3）。
     private func suggestedHeadingLevel(before location: Int, in text: NSString) -> Int {
         var cursor = location
         var steps = 0

@@ -8,7 +8,7 @@ import Combine
 import SwiftUI
 
 /// MDEditor 模块的公开视图
-/// 实现 Ulysses 风格的所见即所得 Markdown 编辑体验
+/// 实现所见即所得的原生 Markdown 编辑体验
 public struct MDEditorView: NSViewRepresentable {
 
     // MARK: - Properties

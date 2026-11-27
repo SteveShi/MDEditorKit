@@ -16,7 +16,7 @@ public enum EditorListKind: String, Sendable, Equatable, Hashable {
     case task
 }
 
-/// 光标或选区所在的块/行内几何作用域（1:1 对齐 Ulysses 42.2 `_actionScope` 5 态模型 + 代码/公式块）。
+/// 光标或选区所在的块/行内几何作用域（5 态作用域模型 + 代码/公式块）。
 public enum EditorBlockContext: Sendable, Equatable, Hashable {
     /// Scope 0：无选区，空白行（paraStart == contentsEnd）。关联值为基于上文标题智能推荐的标题级别（1...3）。
     case empty(suggestedHeadingLevel: Int)
